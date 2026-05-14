@@ -92,6 +92,34 @@
         #gameOver button:hover {
             background: #764ba2;
         }
+
+        #mobileControls {
+            display: none;
+            position: absolute;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 101;
+            gap: 20px;
+        }
+        #mobileControls button {
+            background: #667eea;
+            color: #fff;
+            border: none;
+            padding: 16px 32px;
+            font-size: 1.2rem;
+            border-radius: 8px;
+            margin: 0 10px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        #mobileControls button:active {
+            background: #764ba2;
+        }
+        @media (max-width: 700px) {
+            #mobileControls { display: flex; }
+            #controls { display: none; }
+        }
     </style>
 </head>
 <body>
@@ -99,6 +127,10 @@
         <canvas id="gameCanvas" width="1000" height="600"></canvas>
         <div id="score" class="info">Score: <span id="scoreValue">0</span></div>
         <div id="controls" class="info">A/D: Move | SPACE: Jump | ESC: Quit</div>
+        <div id="mobileControls">
+            <button id="mobileJump" aria-label="Jump">Jump</button>
+            <button id="mobileQuit" aria-label="Quit">Quit</button>
+        </div>
         <div id="gameOver">
             <h1>Game Over!</h1>
             <p>Final Score: <span id="finalScore">0</span></p>
@@ -408,6 +440,26 @@
             } else {
                 gameState.keys[e.key] = false;
             }
+        });
+
+        // Mobile controls logic
+        document.getElementById('mobileJump').addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            gameState.keys[' '] = true;
+            gameState.keys['Space'] = true;
+            gameState.keys['Spacebar'] = true;
+        });
+        document.getElementById('mobileJump').addEventListener('touchend', function(e) {
+            e.preventDefault();
+            gameState.keys[' '] = false;
+            gameState.keys['Space'] = false;
+            gameState.keys['Spacebar'] = false;
+        });
+        document.getElementById('mobileQuit').addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            gameState.gameRunning = false;
+            document.getElementById('gameOver').style.display = 'block';
+            document.getElementById('finalScore').textContent = gameState.score;
         });
 
         // Start game
