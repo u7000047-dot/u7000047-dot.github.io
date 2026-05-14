@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to Side Scroller Game!</title>
+    <style>
+        body {
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #fff;
+        }
+        .container {
+            background: rgba(0,0,0,0.7);
+            border-radius: 16px;
+            padding: 40px 32px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            text-align: center;
+            max-width: 400px;
+        }
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 16px;
+            color: #ffd700;
+        }
+        p {
+            font-size: 1.2rem;
+            margin-bottom: 32px;
+        }
+        .play-btn {
+            background: #667eea;
+            color: #fff;
+            border: none;
+            padding: 16px 40px;
+            font-size: 1.3rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.3s;
+            font-weight: bold;
+        }
+        .play-btn:hover {
+            background: #764ba2;
+        }
+        .footer {
+            margin-top: 40px;
+            font-size: 0.95rem;
+            color: #eee;
+        }
+        @media (max-width: 500px) {
+            .container { padding: 24px 8px; }
+            h1 { font-size: 2rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Side Scroller Game</h1>
+        <p>Welcome to my new side-scrolling platformer!<br>
+        Use A/D to move, SPACE to jump, and avoid the enemies.<br>
+        Try to get the highest score!</p>
+        <a href="side_scroller_game.html">
+            <button class="play-btn">Play Now</button>
+        </a>
+    </div>
+    <div class="footer">
+        &copy; 2026 Your Name &mdash; Hosted on GitHub Pages
+    </div>
+</body>
+</html>

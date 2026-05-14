@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Side Scrolling Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: Arial, sans-serif;
+        }
+
+        #gameContainer {
+            position: relative;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            background: #87ceeb;
+        }
+
+        .info {
+            position: absolute;
+            color: black;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(255, 255, 255, 0.8);
+        }
+
+        #score {
+            top: 10px;
+            left: 10px;
+        }
+
+        #controls {
+            bottom: 10px;
+            left: 10px;
+            font-size: 14px;
+        }
+
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 40px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+            z-index: 100;
+            min-width: 300px;
+        }
+
+        #gameOver h1 {
+            font-size: 36px;
+            margin-bottom: 20px;
+            color: #ffd700;
+        }
+
+        #gameOver p {
+            font-size: 20px;
+            margin-bottom: 20px;
+        }
+
+        #gameOver button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 30px;
+            font-size: 18px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        #gameOver button:hover {
+            background: #764ba2;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="1000" height="600"></canvas>
+        <div id="score" class="info">Score: <span id="scoreValue">0</span></div>
+        <div id="controls" class="info">A/D: Move | SPACE: Jump | ESC: Quit</div>
+        <div id="gameOver">
+            <h1>Game Over!</h1>
+            <p>Final Score: <span id="finalScore">0</span></p>
+            <button onclick="location.reload()">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        // Game Constants
+        const SCREEN_WIDTH = 1000;
+        const SCREEN_HEIGHT = 600;
+        const GROUND_HEIGHT = 100;
+        const FPS = 60;
+
+        // Colors
+        const COLORS = {
+            WHITE: '#ffffff',
+            BLACK: '#000000',
+            BLUE: '#6495ed',
+            RED: '#dc143c',
+            GREEN: '#228b22',
+            YELLOW: '#ffdf00',
+            LIGHT_BLUE: '#87ceeb',
+            DARK_GREEN: '#006400'
+        };
+
+        // Game State
+        const gameState = {
+            score: 0,
+            gameRunning: true,
+            keys: {}
+        };
+
+        // Direction enum
+        const Direction = {
+            IDLE: 0,
+            LEFT: 1,
+            RIGHT: 2
+        };
+
+        // Player class
+        class Player {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 40;
+                this.height = 60;
+                this.velocityX = 0;
+                this.velocityY = 0;
+                this.speed = 5;
+                this.maxSpeed = 8;
+                this.isJumping = false;
+                this.gravity = 0.5;
+                this.jumpPower = -15;
+                this.direction = Direction.IDLE;
+                
+                // Load character images
+                this.imageLeft = new Image();
+                this.imageLeft.src = 'charmander_left.png';
+                
+                this.imageRight = new Image();
+                this.imageRight.src = 'charmander_right.png';
+                
+                // Default image
+                this.currentImage = this.imageRight;
+            }
+
+            handleInput(keys) {
+                this.velocityX = 0;
+
+                if (keys['a'] || keys['A']) {
+                    this.velocityX = -this.maxSpeed;
+                    this.direction = Direction.LEFT;
+                    this.currentImage = this.imageLeft;
+                }
+                if (keys['d'] || keys['D']) {
+                    this.velocityX = this.maxSpeed;
+                    this.direction = Direction.RIGHT;
+                    this.currentImage = this.imageRight;
+                }
+
+                 // Support several possible space key identifiers
+                if ((keys[' '] || keys['Spacebar'] || keys['Space'] || keys['Space']) && !this.isJumping) {
+                    this.isJumping = true;
+                    this.velocityY = this.jumpPower;
+                }
+            }
+
+            applyGravity() {
+                const groundY = SCREEN_HEIGHT - GROUND_HEIGHT - this.height;
+
+                // Apply gravity to vertical velocity
+                this.velocityY += this.gravity;
+
+                // Apply vertical movement
+                this.y += this.velocityY;
+
+                // Check if landed on ground (after movement)
+                if (this.y >= groundY) {
+                    this.y = groundY;
+                    this.isJumping = false;
+                    this.velocityY = 0;
+                }
+            }
+
+            update(keys) {
+                this.handleInput(keys);
+
+                // Horizontal movement
+                this.x += this.velocityX;
+
+                // Vertical movement and gravity handled together
+                this.applyGravity();
+
+                // Keep on screen
+                if (this.x < 0) this.x = 0;
+                if (this.x + this.width > SCREEN_WIDTH) this.x = SCREEN_WIDTH - this.width;
+            }
+
+            draw(ctx) {
+                // Draw character image
+                if (this.currentImage.complete) {
+                    ctx.drawImage(this.currentImage, this.x, this.y, this.width, this.height);
+                } else {
+                    // Fallback while image is loading
+                    ctx.fillStyle = COLORS.RED;
+                    ctx.fillRect(this.x, this.y, this.width, this.height);
+                }
+            }
+
+            getCollisionBox() {
+                return {
+                    x: this.x,
+                    y: this.y,
+                    width: this.width,
+                    height: this.height
+                };
+            }
+        }
+
+        // Enemy class
+        class Enemy {
+            constructor(x, y, leftBound, rightBound) {
+                this.x = x;
+                this.y = y;
+                this.width = 35;
+                this.height = 50;
+                this.speed = 2;
+                this.direction = 1; // 1 for right, -1 for left
+                this.leftBound = leftBound;
+                this.rightBound = rightBound;
+            }
+
+            update() {
+                this.x += this.speed * this.direction;
+
+                if (this.x <= this.leftBound) {
+                    this.direction = 1;
+                }
+                if (this.x + this.width >= this.rightBound) {
+                    this.direction = -1;
+                }
+            }
+
+            draw(ctx) {
+                // Draw body
+                ctx.fillStyle = COLORS.BLUE;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+
+                // Draw eyes
+                const eyeY = this.y + 15;
+                ctx.fillStyle = COLORS.WHITE;
+                ctx.beginPath();
+                ctx.arc(this.x + 10, eyeY, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(this.x + this.width - 10, eyeY, 4, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = COLORS.BLACK;
+                ctx.beginPath();
+                ctx.arc(this.x + 10, eyeY, 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(this.x + this.width - 10, eyeY, 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            getCollisionBox() {
+                return {
+                    x: this.x,
+                    y: this.y,
+                    width: this.width,
+                    height: this.height
+                };
+            }
+        }
+
+        // Collision detection
+        function checkCollision(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+
+        // Game class
+        class Game {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.player = new Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT - GROUND_HEIGHT - 60);
+                this.enemies = [
+                    new Enemy(200, SCREEN_HEIGHT - GROUND_HEIGHT - 50, 100, 400),
+                    new Enemy(600, SCREEN_HEIGHT - GROUND_HEIGHT - 50, 500, 800)
+                ];
+            }
+
+            update() {
+                if (!gameState.gameRunning) return;
+
+                this.player.update(gameState.keys);
+
+                for (let enemy of this.enemies) {
+                    enemy.update();
+                }
+
+                // Check collisions
+                const playerBox = this.player.getCollisionBox();
+                for (let enemy of this.enemies) {
+                    const enemyBox = enemy.getCollisionBox();
+                    if (checkCollision(playerBox, enemyBox)) {
+                        this.player.x = SCREEN_WIDTH / 2;
+                        this.player.y = SCREEN_HEIGHT - GROUND_HEIGHT - 60;
+                        gameState.score = Math.max(0, gameState.score - 10);
+                    }
+                }
+            }
+
+            draw() {
+                // Clear screen
+                this.ctx.fillStyle = COLORS.LIGHT_BLUE;
+                this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+                // Draw sky
+                this.ctx.fillStyle = COLORS.LIGHT_BLUE;
+                this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - GROUND_HEIGHT);
+
+                // Draw ground
+                this.ctx.fillStyle = COLORS.GREEN;
+                this.ctx.fillRect(0, SCREEN_HEIGHT - GROUND_HEIGHT, SCREEN_WIDTH, GROUND_HEIGHT);
+
+                // Draw grass pattern
+                this.ctx.strokeStyle = COLORS.DARK_GREEN;
+                this.ctx.lineWidth = 2;
+                for (let x = 0; x < SCREEN_WIDTH; x += 50) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(x, SCREEN_HEIGHT - GROUND_HEIGHT);
+                    this.ctx.lineTo(x + 25, SCREEN_HEIGHT - GROUND_HEIGHT + 10);
+                    this.ctx.stroke();
+                }
+
+                // Draw player
+                this.player.draw(this.ctx);
+
+                // Draw enemies
+                for (let enemy of this.enemies) {
+                    enemy.draw(this.ctx);
+                }
+
+                // Update score display
+                document.getElementById('scoreValue').textContent = gameState.score;
+            }
+
+            run() {
+                setInterval(() => {
+                    this.update();
+                    this.draw();
+                }, 1000 / FPS);
+            }
+        }
+
+        // Event listeners
+        document.addEventListener('keydown', (e) => {
+            // Prevent page from scrolling when Space is pressed and normalize space keys
+            if (e.code === 'Space') {
+                e.preventDefault();
+                gameState.keys[' '] = true;
+                gameState.keys['Space'] = true;
+                gameState.keys['Spacebar'] = true;
+            } else {
+                gameState.keys[e.key] = true;
+            }
+
+            if (e.key === 'Escape') {
+                gameState.gameRunning = false;
+                document.getElementById('gameOver').style.display = 'block';
+                document.getElementById('finalScore').textContent = gameState.score;
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.code === 'Space') {
+                gameState.keys[' '] = false;
+                gameState.keys['Space'] = false;
+                gameState.keys['Spacebar'] = false;
+            } else {
+                gameState.keys[e.key] = false;
+            }
+        });
+
+        // Start game
+        window.addEventListener('load', () => {
+            const game = new Game();
+            game.run();
+        });
+    </script>
+</body>
+</html>
