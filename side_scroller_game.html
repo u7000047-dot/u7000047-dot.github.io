@@ -10,7 +10,6 @@
             padding: 0;
             box-sizing: border-box;
         }
-
         body {
             display: flex;
             justify-content: center;
@@ -19,7 +18,6 @@
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             font-family: Arial, sans-serif;
         }
-
         #gameContainer {
             position: relative;
             background: white;
@@ -27,12 +25,10 @@
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
             overflow: hidden;
         }
-
         canvas {
             display: block;
             background: #87ceeb;
         }
-
         .info {
             position: absolute;
             color: black;
@@ -40,18 +36,20 @@
             font-weight: bold;
             text-shadow: 2px 2px 4px rgba(255, 255, 255, 0.8);
         }
-
         #score {
             top: 10px;
             left: 10px;
         }
-
         #controls {
             bottom: 10px;
             left: 10px;
             font-size: 14px;
         }
-
+        #version {
+            bottom: 10px;
+            right: 10px;
+            font-size: 14px;
+        }
         #gameOver {
             position: absolute;
             top: 50%;
@@ -66,18 +64,15 @@
             z-index: 100;
             min-width: 300px;
         }
-
         #gameOver h1 {
             font-size: 36px;
             margin-bottom: 20px;
             color: #ffd700;
         }
-
         #gameOver p {
             font-size: 20px;
             margin-bottom: 20px;
         }
-
         #gameOver button {
             background: #667eea;
             color: white;
@@ -88,37 +83,8 @@
             cursor: pointer;
             transition: background 0.3s;
         }
-
         #gameOver button:hover {
             background: #764ba2;
-        }
-
-        #mobileControls {
-            display: none;
-            position: absolute;
-            bottom: 60px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 101;
-            gap: 20px;
-        }
-        #mobileControls button {
-            background: #667eea;
-            color: #fff;
-            border: none;
-            padding: 16px 32px;
-            font-size: 1.2rem;
-            border-radius: 8px;
-            margin: 0 10px;
-            cursor: pointer;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-        }
-        #mobileControls button:active {
-            background: #764ba2;
-        }
-        @media (max-width: 700px) {
-            #mobileControls { display: flex; }
-            #controls { display: none; }
         }
     </style>
 </head>
@@ -126,25 +92,19 @@
     <div id="gameContainer">
         <canvas id="gameCanvas" width="1000" height="600"></canvas>
         <div id="score" class="info">Score: <span id="scoreValue">0</span></div>
-        <div id="controls" class="info">A/D: Move | SPACE: Jump | ESC: Quit</div>
-        <div id="mobileControls">
-            <button id="mobileJump" aria-label="Jump">Jump</button>
-            <button id="mobileQuit" aria-label="Quit">Quit</button>
-        </div>
-        <div id="gameOver">
+        <div id="controls" class="info">A/D: Move | W: Jump | ESC: Quit</div>        <div id="version" class="info">v1.0</div>        <div id="gameOver">
             <h1>Game Over!</h1>
             <p>Final Score: <span id="finalScore">0</span></p>
             <button onclick="location.reload()">Play Again</button>
         </div>
     </div>
-
     <script>
         // Game Constants
         const SCREEN_WIDTH = 1000;
         const SCREEN_HEIGHT = 600;
         const GROUND_HEIGHT = 100;
         const FPS = 60;
-
+        const VERSION = '1.0';
         // Colors
         const COLORS = {
             WHITE: '#ffffff',
@@ -156,21 +116,18 @@
             LIGHT_BLUE: '#87ceeb',
             DARK_GREEN: '#006400'
         };
-
         // Game State
         const gameState = {
             score: 0,
             gameRunning: true,
             keys: {}
         };
-
         // Direction enum
         const Direction = {
             IDLE: 0,
             LEFT: 1,
             RIGHT: 2
         };
-
         // Player class
         class Player {
             constructor(x, y) {
@@ -197,10 +154,8 @@
                 // Default image
                 this.currentImage = this.imageRight;
             }
-
             handleInput(keys) {
                 this.velocityX = 0;
-
                 if (keys['a'] || keys['A']) {
                     this.velocityX = -this.maxSpeed;
                     this.direction = Direction.LEFT;
@@ -211,45 +166,33 @@
                     this.direction = Direction.RIGHT;
                     this.currentImage = this.imageRight;
                 }
-
-                 // Support several possible space key identifiers
-                if ((keys[' '] || keys['Spacebar'] || keys['Space'] || keys['Space']) && !this.isJumping) {
+                if ((keys['w'] || keys['W']) && !this.isJumping) {
                     this.isJumping = true;
                     this.velocityY = this.jumpPower;
                 }
             }
-
             applyGravity() {
                 const groundY = SCREEN_HEIGHT - GROUND_HEIGHT - this.height;
-
-                // Apply gravity to vertical velocity
+                
+                // Always apply gravity
                 this.velocityY += this.gravity;
-
-                // Apply vertical movement
-                this.y += this.velocityY;
-
-                // Check if landed on ground (after movement)
-                if (this.y >= groundY) {
+                
+                // Check if on ground (only reset if moving downward)
+                if (this.y >= groundY && this.velocityY >= 0) {
                     this.y = groundY;
                     this.isJumping = false;
                     this.velocityY = 0;
                 }
             }
-
             update(keys) {
                 this.handleInput(keys);
-
-                // Horizontal movement
-                this.x += this.velocityX;
-
-                // Vertical movement and gravity handled together
                 this.applyGravity();
-
+                this.x += this.velocityX;
+                this.y += this.velocityY;
                 // Keep on screen
                 if (this.x < 0) this.x = 0;
                 if (this.x + this.width > SCREEN_WIDTH) this.x = SCREEN_WIDTH - this.width;
             }
-
             draw(ctx) {
                 // Draw character image
                 if (this.currentImage.complete) {
@@ -260,7 +203,6 @@
                     ctx.fillRect(this.x, this.y, this.width, this.height);
                 }
             }
-
             getCollisionBox() {
                 return {
                     x: this.x,
@@ -270,7 +212,6 @@
                 };
             }
         }
-
         // Enemy class
         class Enemy {
             constructor(x, y, leftBound, rightBound) {
@@ -283,10 +224,8 @@
                 this.leftBound = leftBound;
                 this.rightBound = rightBound;
             }
-
             update() {
                 this.x += this.speed * this.direction;
-
                 if (this.x <= this.leftBound) {
                     this.direction = 1;
                 }
@@ -294,12 +233,10 @@
                     this.direction = -1;
                 }
             }
-
             draw(ctx) {
                 // Draw body
                 ctx.fillStyle = COLORS.BLUE;
                 ctx.fillRect(this.x, this.y, this.width, this.height);
-
                 // Draw eyes
                 const eyeY = this.y + 15;
                 ctx.fillStyle = COLORS.WHITE;
@@ -309,7 +246,6 @@
                 ctx.beginPath();
                 ctx.arc(this.x + this.width - 10, eyeY, 4, 0, Math.PI * 2);
                 ctx.fill();
-
                 ctx.fillStyle = COLORS.BLACK;
                 ctx.beginPath();
                 ctx.arc(this.x + 10, eyeY, 2, 0, Math.PI * 2);
@@ -318,7 +254,6 @@
                 ctx.arc(this.x + this.width - 10, eyeY, 2, 0, Math.PI * 2);
                 ctx.fill();
             }
-
             getCollisionBox() {
                 return {
                     x: this.x,
@@ -328,7 +263,6 @@
                 };
             }
         }
-
         // Collision detection
         function checkCollision(rect1, rect2) {
             return rect1.x < rect2.x + rect2.width &&
@@ -336,7 +270,6 @@
                    rect1.y < rect2.y + rect2.height &&
                    rect1.y + rect1.height > rect2.y;
         }
-
         // Game class
         class Game {
             constructor() {
@@ -348,16 +281,12 @@
                     new Enemy(600, SCREEN_HEIGHT - GROUND_HEIGHT - 50, 500, 800)
                 ];
             }
-
             update() {
                 if (!gameState.gameRunning) return;
-
                 this.player.update(gameState.keys);
-
                 for (let enemy of this.enemies) {
                     enemy.update();
                 }
-
                 // Check collisions
                 const playerBox = this.player.getCollisionBox();
                 for (let enemy of this.enemies) {
@@ -369,20 +298,16 @@
                     }
                 }
             }
-
             draw() {
                 // Clear screen
                 this.ctx.fillStyle = COLORS.LIGHT_BLUE;
                 this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-
                 // Draw sky
                 this.ctx.fillStyle = COLORS.LIGHT_BLUE;
                 this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - GROUND_HEIGHT);
-
                 // Draw ground
                 this.ctx.fillStyle = COLORS.GREEN;
                 this.ctx.fillRect(0, SCREEN_HEIGHT - GROUND_HEIGHT, SCREEN_WIDTH, GROUND_HEIGHT);
-
                 // Draw grass pattern
                 this.ctx.strokeStyle = COLORS.DARK_GREEN;
                 this.ctx.lineWidth = 2;
@@ -392,19 +317,15 @@
                     this.ctx.lineTo(x + 25, SCREEN_HEIGHT - GROUND_HEIGHT + 10);
                     this.ctx.stroke();
                 }
-
                 // Draw player
                 this.player.draw(this.ctx);
-
                 // Draw enemies
                 for (let enemy of this.enemies) {
                     enemy.draw(this.ctx);
                 }
-
                 // Update score display
                 document.getElementById('scoreValue').textContent = gameState.score;
             }
-
             run() {
                 setInterval(() => {
                     this.update();
@@ -412,56 +333,18 @@
                 }, 1000 / FPS);
             }
         }
-
         // Event listeners
         document.addEventListener('keydown', (e) => {
-            // Prevent page from scrolling when Space is pressed and normalize space keys
-            if (e.code === 'Space') {
-                e.preventDefault();
-                gameState.keys[' '] = true;
-                gameState.keys['Space'] = true;
-                gameState.keys['Spacebar'] = true;
-            } else {
-                gameState.keys[e.key] = true;
-            }
-
+            gameState.keys[e.key] = true;
             if (e.key === 'Escape') {
                 gameState.gameRunning = false;
                 document.getElementById('gameOver').style.display = 'block';
                 document.getElementById('finalScore').textContent = gameState.score;
             }
         });
-
         document.addEventListener('keyup', (e) => {
-            if (e.code === 'Space') {
-                gameState.keys[' '] = false;
-                gameState.keys['Space'] = false;
-                gameState.keys['Spacebar'] = false;
-            } else {
-                gameState.keys[e.key] = false;
-            }
+            gameState.keys[e.key] = false;
         });
-
-        // Mobile controls logic
-        document.getElementById('mobileJump').addEventListener('touchstart', function(e) {
-            e.preventDefault();
-            gameState.keys[' '] = true;
-            gameState.keys['Space'] = true;
-            gameState.keys['Spacebar'] = true;
-        });
-        document.getElementById('mobileJump').addEventListener('touchend', function(e) {
-            e.preventDefault();
-            gameState.keys[' '] = false;
-            gameState.keys['Space'] = false;
-            gameState.keys['Spacebar'] = false;
-        });
-        document.getElementById('mobileQuit').addEventListener('touchstart', function(e) {
-            e.preventDefault();
-            gameState.gameRunning = false;
-            document.getElementById('gameOver').style.display = 'block';
-            document.getElementById('finalScore').textContent = gameState.score;
-        });
-
         // Start game
         window.addEventListener('load', () => {
             const game = new Game();
