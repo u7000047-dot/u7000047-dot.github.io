@@ -120,7 +120,13 @@
         const gameState = {
             score: 0,
             gameRunning: true,
-            keys: {}
+            keys: {},
+            fireballs: [],
+            enemyFireballs: [],
+            level: 1,
+            levelBannerTimer: 0,
+            showLevelBanner: true,
+            lives: 3
         };
         // Direction enum
         const Direction = {
@@ -219,19 +225,38 @@
                 this.y = y;
                 this.width = 35;
                 this.height = 50;
-                this.speed = 2;
-                this.direction = 1; // 1 for right, -1 for left
-                this.leftBound = leftBound;
-                this.rightBound = rightBound;
+                this.speed = 1.2 + Math.floor(gameState.level / 2) * 0.2;
+                this.centerX = SCREEN_WIDTH / 2;
+                this.shootCooldown = Math.random() * 120 + 60; // randomize first shot
             }
             update() {
-                this.x += this.speed * this.direction;
-                if (this.x <= this.leftBound) {
-                    this.direction = 1;
+                // Move slowly toward the center of the screen
+                if (Math.abs(this.x + this.width/2 - this.centerX) > 2) {
+                    if (this.x + this.width/2 < this.centerX) {
+                        this.x += this.speed;
+                    } else {
+                        this.x -= this.speed;
+                    }
                 }
-                if (this.x + this.width >= this.rightBound) {
-                    this.direction = -1;
+                // Shooting logic
+                this.shootCooldown--;
+                if (this.shootCooldown <= 0) {
+                    this.shootAtPlayer();
+                    this.shootCooldown = Math.random() * 120 + 60; // shoot every 1-3 seconds
                 }
+            }
+            shootAtPlayer() {
+                const player = window.game.gameInstance.player;
+                const startX = this.x + this.width/2;
+                const startY = this.y + this.height;
+                // Calculate direction vector to player
+                const dx = player.x + player.width/2 - startX;
+                const dy = player.y + player.height/2 - startY;
+                const mag = Math.sqrt(dx*dx + dy*dy);
+                const speed = 6 + gameState.level * 0.5;
+                const vx = dx / mag * speed;
+                const vy = dy / mag * speed;
+                gameState.enemyFireballs.push(new EnemyFireball(startX, startY, vx, vy));
             }
             draw(ctx) {
                 // Draw body
@@ -263,6 +288,42 @@
                 };
             }
         }
+        // EnemyFireball class
+        class EnemyFireball {
+            constructor(x, y, vx, vy) {
+                this.x = x;
+                this.y = y;
+                this.radius = 10;
+                this.vx = vx;
+                this.vy = vy;
+                this.active = true;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                if (this.x < 0 || this.x > SCREEN_WIDTH || this.y < 0 || this.y > SCREEN_HEIGHT) {
+                    this.active = false;
+                }
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = COLORS.RED;
+                ctx.shadowColor = COLORS.BLACK;
+                ctx.shadowBlur = 10;
+                ctx.fill();
+                ctx.restore();
+            }
+            getCollisionBox() {
+                return {
+                    x: this.x - this.radius,
+                    y: this.y - this.radius,
+                    width: this.radius * 2,
+                    height: this.radius * 2
+                };
+            }
+        }
         // Collision detection
         function checkCollision(rect1, rect2) {
             return rect1.x < rect2.x + rect2.width &&
@@ -276,19 +337,75 @@
                 this.canvas = document.getElementById('gameCanvas');
                 this.ctx = this.canvas.getContext('2d');
                 this.player = new Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT - GROUND_HEIGHT - 60);
-                this.enemies = [
-                    new Enemy(200, SCREEN_HEIGHT - GROUND_HEIGHT - 50, 100, 400),
-                    new Enemy(600, SCREEN_HEIGHT - GROUND_HEIGHT - 50, 500, 800)
-                ];
+                this.enemies = [];
+                this.spawnEnemies();
+            }
+            spawnEnemies() {
+                // Increase number and speed of enemies with level
+                this.enemies = [];
+                const numEnemies = 2 + gameState.level;
+                for (let i = 0; i < numEnemies; i++) {
+                    const left = 100 + i * 100;
+                    const right = left + 200;
+                    const y = SCREEN_HEIGHT - GROUND_HEIGHT - 50;
+                    const enemy = new Enemy(left, y, left, right);
+                    enemy.speed = 2 + Math.floor(gameState.level / 2);
+                    this.enemies.push(enemy);
+                }
+                // Reset fireballs
+                gameState.fireballs = [];
+                gameState.enemyFireballs = [];
             }
             update() {
                 if (!gameState.gameRunning) return;
+                // Show level banner for 1.5s at start
+                if (gameState.showLevelBanner) {
+                    gameState.levelBannerTimer++;
+                    if (gameState.levelBannerTimer > FPS * 1.5) {
+                        gameState.showLevelBanner = false;
+                    }
+                    return;
+                }
                 this.player.update(gameState.keys);
                 for (let enemy of this.enemies) {
                     enemy.update();
                 }
-                // Check collisions
+                // Update fireballs
+                for (let fireball of gameState.fireballs) {
+                    fireball.update();
+                }
+                for (let efb of gameState.enemyFireballs) {
+                    efb.update();
+                }
+                // Remove inactive fireballs
+                gameState.fireballs = gameState.fireballs.filter(f => f.active);
+                gameState.enemyFireballs = gameState.enemyFireballs.filter(f => f.active);
+                // Fireball-enemy collision
+                for (let fireball of gameState.fireballs) {
+                    for (let i = this.enemies.length - 1; i >= 0; i--) {
+                        if (checkCollision(fireball.getCollisionBox(), this.enemies[i].getCollisionBox())) {
+                            this.enemies.splice(i, 1);
+                            fireball.active = false;
+                            gameState.score += 50;
+                        }
+                    }
+                }
+                // Enemy fireball - player collision
                 const playerBox = this.player.getCollisionBox();
+                for (let efb of gameState.enemyFireballs) {
+                    if (checkCollision(playerBox, efb.getCollisionBox())) {
+                        efb.active = false;
+                        gameState.lives--;
+                        if (gameState.lives <= 0) {
+                            // Reset level and lives
+                            gameState.lives = 3;
+                            gameState.showLevelBanner = true;
+                            gameState.levelBannerTimer = 0;
+                            this.spawnEnemies();
+                        }
+                    }
+                }
+                // Check player-enemy collision
                 for (let enemy of this.enemies) {
                     const enemyBox = enemy.getCollisionBox();
                     if (checkCollision(playerBox, enemyBox)) {
@@ -296,6 +413,13 @@
                         this.player.y = SCREEN_HEIGHT - GROUND_HEIGHT - 60;
                         gameState.score = Math.max(0, gameState.score - 10);
                     }
+                }
+                // Level clear check
+                if (this.enemies.length === 0) {
+                    gameState.level++;
+                    gameState.showLevelBanner = true;
+                    gameState.levelBannerTimer = 0;
+                    this.spawnEnemies();
                 }
             }
             draw() {
@@ -323,8 +447,36 @@
                 for (let enemy of this.enemies) {
                     enemy.draw(this.ctx);
                 }
+                // Draw fireballs
+                for (let fireball of gameState.fireballs) {
+                    fireball.draw(this.ctx);
+                }
+                // Draw enemy fireballs
+                for (let efb of gameState.enemyFireballs) {
+                    efb.draw(this.ctx);
+                }
                 // Update score display
                 document.getElementById('scoreValue').textContent = gameState.score;
+                // Draw lives
+                this.ctx.save();
+                this.ctx.font = 'bold 28px Arial';
+                this.ctx.fillStyle = COLORS.RED;
+                this.ctx.textAlign = 'left';
+                this.ctx.fillText('Lives: ' + gameState.lives, 20, 60);
+                this.ctx.restore();
+                // Draw level banner
+                if (gameState.showLevelBanner) {
+                    this.ctx.save();
+                    this.ctx.globalAlpha = 0.9;
+                    this.ctx.fillStyle = COLORS.BLACK;
+                    this.ctx.fillRect(SCREEN_WIDTH/2-180, SCREEN_HEIGHT/2-60, 360, 120);
+                    this.ctx.globalAlpha = 1.0;
+                    this.ctx.fillStyle = COLORS.YELLOW;
+                    this.ctx.font = 'bold 48px Arial';
+                    this.ctx.textAlign = 'center';
+                    this.ctx.fillText('Level ' + gameState.level, SCREEN_WIDTH/2, SCREEN_HEIGHT/2);
+                    this.ctx.restore();
+                }
             }
             run() {
                 setInterval(() => {
@@ -333,22 +485,36 @@
                 }, 1000 / FPS);
             }
         }
-        // Event listeners
-        document.addEventListener('keydown', (e) => {
-            gameState.keys[e.key] = true;
-            if (e.key === 'Escape') {
-                gameState.gameRunning = false;
-                document.getElementById('gameOver').style.display = 'block';
-                document.getElementById('finalScore').textContent = gameState.score;
-            }
-        });
-        document.addEventListener('keyup', (e) => {
-            gameState.keys[e.key] = false;
-        });
         // Start game
         window.addEventListener('load', () => {
+            window.game = {};
             const game = new Game();
+            window.game.gameInstance = game;
             game.run();
+
+            // Move event listeners here so 'game' is defined
+            document.addEventListener('keydown', (e) => {
+                gameState.keys[e.key] = true;
+                if (e.key === 'Escape') {
+                    gameState.gameRunning = false;
+                    document.getElementById('gameOver').style.display = 'block';
+                    document.getElementById('finalScore').textContent = gameState.score;
+                }
+                // Shoot fireball with SPACE
+                if ((e.key === ' ' || e.code === 'Space') && gameState.gameRunning && !gameState.showLevelBanner) {
+                    const player = game.gameInstance.player;
+                    const dir = player.direction === Direction.LEFT ? -1 : 1;
+                    const fireball = new Fireball(
+                        player.x + player.width/2 + dir*player.width/2,
+                        player.y + player.height/2,
+                        dir
+                    );
+                    gameState.fireballs.push(fireball);
+                }
+            });
+            document.addEventListener('keyup', (e) => {
+                gameState.keys[e.key] = false;
+            });
         });
     </script>
 </body>
