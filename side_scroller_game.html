@@ -104,6 +104,7 @@
         const SCREEN_HEIGHT = 600;
         const GROUND_HEIGHT = 100;
         const FPS = 60;
+        const WORLD_WIDTH = SCREEN_WIDTH * 2;
         const VERSION = '1.0';
         // Colors
         const COLORS = {
@@ -197,7 +198,7 @@
                 this.y += this.velocityY;
                 // Keep on screen
                 if (this.x < 0) this.x = 0;
-                if (this.x + this.width > SCREEN_WIDTH) this.x = SCREEN_WIDTH - this.width;
+                if (this.x + this.width > WORLD_WIDTH) this.x = WORLD_WIDTH - this.width;
             }
             draw(ctx) {
                 // Draw character image
@@ -220,13 +221,13 @@
         }
         // Enemy class
         class Enemy {
-            constructor(x, y, leftBound, rightBound) {
+            constructor(x, y, patrolCenter) {
                 this.x = x;
                 this.y = y;
                 this.width = 35;
                 this.height = 50;
                 this.speed = 1.2 + Math.floor(gameState.level / 2) * 0.2;
-                this.centerX = SCREEN_WIDTH / 2;
+                this.centerX = patrolCenter;
                 this.shootCooldown = Math.random() * 120 + 60; // randomize first shot
             }
             update() {
@@ -301,7 +302,7 @@
             update() {
                 this.x += this.vx;
                 this.y += this.vy;
-                if (this.x < 0 || this.x > SCREEN_WIDTH || this.y < 0 || this.y > SCREEN_HEIGHT) {
+                if (this.x < 0 || this.x > WORLD_WIDTH || this.y < 0 || this.y > SCREEN_HEIGHT) {
                     this.active = false;
                 }
             }
@@ -324,6 +325,313 @@
                 };
             }
         }
+        // Player Fireball class
+        class Fireball {
+            constructor(x, y, dir) {
+                this.x = x;
+                this.y = y;
+                this.radius = 10;
+                this.vx = dir * 12;
+                this.vy = 0;
+                this.active = true;
+            }
+            update() {
+                this.x += this.vx;
+                if (this.x < 0 || this.x > WORLD_WIDTH) {
+                    this.active = false;
+                }
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = COLORS.YELLOW;
+                ctx.shadowColor = COLORS.RED;
+                ctx.shadowBlur = 12;
+                ctx.fill();
+                ctx.restore();
+            }
+            getCollisionBox() {
+                return {
+                    x: this.x - this.radius,
+                    y: this.y - this.radius,
+                    width: this.radius * 2,
+                    height: this.radius * 2
+                };
+            }
+        }
+        // House class
+        class House {
+            constructor() {
+                this.x = WORLD_WIDTH / 2 - 100;
+                this.y = SCREEN_HEIGHT - GROUND_HEIGHT - 150;
+                this.width = 200;
+                this.height = 150;
+                this.wallThickness = 16;
+                this.health = 100;
+                this.maxHealth = 100;
+                this.frame = 0;
+            }
+            takeDamage(amount) { this.health = Math.max(0, this.health - amount); }
+            repair(amount)     { this.health = Math.min(this.maxHealth, this.health + amount); }
+            update()           { this.frame++; }
+            isDestroyed()      { return this.health <= 0; }
+            getLeftWallBox() {
+                if (this.isDestroyed()) return { x: -9999, y: -9999, width: 0, height: 0 };
+                return { x: this.x, y: this.y, width: this.wallThickness, height: this.height };
+            }
+            getRightWallBox() {
+                if (this.isDestroyed()) return { x: -9999, y: -9999, width: 0, height: 0 };
+                return { x: this.x + this.width - this.wallThickness, y: this.y, width: this.wallThickness, height: this.height };
+            }
+            drawCracks(ctx, wx, wy, heavy) {
+                ctx.save();
+                ctx.strokeStyle = '#1a0800';
+                ctx.lineWidth = heavy ? 2 : 1.5;
+                ctx.beginPath();
+                ctx.moveTo(wx + 4, wy + 18); ctx.lineTo(wx + 9, wy + 34); ctx.lineTo(wx + 5, wy + 52);
+                ctx.moveTo(wx + 11, wy + 68); ctx.lineTo(wx + 6, wy + 84); ctx.lineTo(wx + 12, wy + 108);
+                if (heavy) {
+                    ctx.moveTo(wx + 3, wy + 44); ctx.lineTo(wx + 14, wy + 56); ctx.lineTo(wx + 8, wy + 72);
+                    ctx.moveTo(wx + 7, wy + 118); ctx.lineTo(wx + 3, wy + 140);
+                    ctx.moveTo(wx + 13, wy + 26); ctx.lineTo(wx + 5, wy + 18);
+                }
+                ctx.stroke();
+                ctx.restore();
+            }
+            drawSmoke(ctx, sx, sy, intensity = 1) {
+                ctx.save();
+                for (let i = 0; i < 4; i++) {
+                    const phase = (this.frame * 0.4 + i * 18) % 70;
+                    const px = sx + Math.sin(phase * 0.16) * 6;
+                    const py = sy - phase * 0.85 - 4;
+                    const alpha = Math.max(0, 0.3 * intensity - phase * 0.004);
+                    ctx.fillStyle = `rgba(100,100,100,${alpha.toFixed(3)})`;
+                    ctx.beginPath();
+                    ctx.arc(px, py, (5 + phase * 0.15) * Math.min(intensity, 1.5), 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+            drawFire(ctx, wx, wy, ww, wh) {
+                const f = this.frame;
+                ctx.save();
+                for (let i = 0; i < 4; i++) {
+                    const fx = wx + (0.14 + i * 0.26) * ww;
+                    const fh = 24 + Math.sin(f * 0.19 + i * 1.4) * 10;
+                    const fy = wy + wh - 3;
+                    ctx.fillStyle = 'rgba(255,65,0,0.92)';
+                    ctx.beginPath();
+                    ctx.moveTo(fx - 7, fy);
+                    ctx.quadraticCurveTo(fx - 2, fy - fh * 0.55, fx, fy - fh);
+                    ctx.quadraticCurveTo(fx + 2, fy - fh * 0.55, fx + 7, fy);
+                    ctx.closePath(); ctx.fill();
+                    ctx.fillStyle = 'rgba(255,215,0,0.78)';
+                    ctx.beginPath();
+                    ctx.moveTo(fx - 3, fy);
+                    ctx.quadraticCurveTo(fx - 1, fy - fh * 0.45, fx, fy - fh * 0.72);
+                    ctx.quadraticCurveTo(fx + 1, fy - fh * 0.45, fx + 3, fy);
+                    ctx.closePath(); ctx.fill();
+                }
+                ctx.restore();
+            }
+            drawWindowFire(ctx, wx, wy, ww) {
+                const f = this.frame;
+                ctx.save();
+                const cx = wx + ww / 2;
+                const baseY = wy + 2;
+                for (let i = 0; i < 4; i++) {
+                    const fx = cx + (i - 1.5) * 9 + Math.sin(f * 0.18 + i * 1.2) * 3;
+                    const fh = 18 + Math.sin(f * 0.21 + i * 1.6) * 7;
+                    ctx.fillStyle = 'rgba(255,80,0,0.90)';
+                    ctx.beginPath();
+                    ctx.moveTo(fx - 5, baseY);
+                    ctx.quadraticCurveTo(fx - 1, baseY - fh * 0.5, fx, baseY - fh);
+                    ctx.quadraticCurveTo(fx + 1, baseY - fh * 0.5, fx + 5, baseY);
+                    ctx.closePath(); ctx.fill();
+                    ctx.fillStyle = 'rgba(255,210,0,0.72)';
+                    ctx.beginPath();
+                    ctx.moveTo(fx - 2, baseY);
+                    ctx.quadraticCurveTo(fx, baseY - fh * 0.4, fx, baseY - fh * 0.7);
+                    ctx.quadraticCurveTo(fx + 2, baseY - fh * 0.4, fx + 2, baseY);
+                    ctx.closePath(); ctx.fill();
+                }
+                ctx.restore();
+            }
+            drawRoofFire(ctx) {
+                const { x, y, width } = this;
+                const f = this.frame;
+                ctx.save();
+                const spots = [
+                    { rx: x - 4,            ry: y - 5  },
+                    { rx: x + width * 0.25, ry: y - 42 },
+                    { rx: x + width * 0.5,  ry: y - 78 },
+                    { rx: x + width * 0.75, ry: y - 42 },
+                    { rx: x + width + 4,    ry: y - 5  },
+                ];
+                for (let i = 0; i < spots.length; i++) {
+                    const { rx, ry } = spots[i];
+                    const fh = 22 + Math.sin(f * 0.2 + i * 1.3) * 9;
+                    ctx.fillStyle = 'rgba(255,60,0,0.92)';
+                    ctx.beginPath();
+                    ctx.moveTo(rx - 8, ry);
+                    ctx.quadraticCurveTo(rx - 2, ry - fh * 0.5, rx, ry - fh);
+                    ctx.quadraticCurveTo(rx + 2, ry - fh * 0.5, rx + 8, ry);
+                    ctx.closePath(); ctx.fill();
+                    ctx.fillStyle = 'rgba(255,200,0,0.75)';
+                    ctx.beginPath();
+                    ctx.moveTo(rx - 4, ry);
+                    ctx.quadraticCurveTo(rx, ry - fh * 0.45, rx, ry - fh * 0.78);
+                    ctx.quadraticCurveTo(rx + 4, ry - fh * 0.45, rx + 4, ry);
+                    ctx.closePath(); ctx.fill();
+                }
+                ctx.restore();
+            }
+            drawRubble(ctx) {
+                const { x, y, width, height } = this;
+                const gY = y + height;
+                ctx.save();
+                // Debris mound
+                ctx.fillStyle = '#7a5c2e';
+                ctx.beginPath();
+                ctx.moveTo(x - 12, gY);
+                ctx.lineTo(x + 15,  gY - 42); ctx.lineTo(x + 48, gY - 28);
+                ctx.lineTo(x + 82,  gY - 52); ctx.lineTo(x + 110, gY - 38);
+                ctx.lineTo(x + 145, gY - 56); ctx.lineTo(x + 178, gY - 30);
+                ctx.lineTo(x + width + 12, gY - 18);
+                ctx.lineTo(x + width + 12, gY);
+                ctx.closePath(); ctx.fill();
+                // Dark base shadow
+                ctx.fillStyle = '#4a3010';
+                ctx.beginPath();
+                ctx.moveTo(x - 12, gY); ctx.lineTo(x + 30, gY - 12);
+                ctx.lineTo(x + width / 2, gY - 16); ctx.lineTo(x + width - 20, gY - 10);
+                ctx.lineTo(x + width + 12, gY); ctx.closePath(); ctx.fill();
+                // Scattered bricks
+                const bricks = [
+                    { dx: 8,   dy: -38, w: 32, h: 14, rot:  0.35, color: '#c0392b' },
+                    { dx: 55,  dy: -22, w: 26, h: 12, rot: -0.25, color: '#a93226' },
+                    { dx: 95,  dy: -46, w: 36, h: 14, rot:  0.55, color: '#c0392b' },
+                    { dx: 148, dy: -24, w: 28, h: 13, rot: -0.45, color: '#a93226' },
+                    { dx: -8,  dy: -10, w: 24, h: 10, rot:  0.65, color: '#d4574e' },
+                    { dx: 168, dy: -12, w: 22, h: 10, rot: -0.3,  color: '#c0392b' },
+                    { dx: 38,  dy: -48, w: 20, h: 10, rot:  0.8,  color: '#922b21' },
+                    { dx: 120, dy: -32, w: 30, h: 12, rot: -0.6,  color: '#a93226' },
+                ];
+                for (const b of bricks) {
+                    ctx.save();
+                    ctx.translate(x + b.dx + b.w / 2, gY + b.dy); ctx.rotate(b.rot);
+                    ctx.fillStyle = b.color; ctx.fillRect(-b.w/2, -b.h/2, b.w, b.h);
+                    ctx.strokeStyle = '#5c1a15'; ctx.lineWidth = 1;
+                    ctx.strokeRect(-b.w/2, -b.h/2, b.w, b.h);
+                    ctx.restore();
+                }
+                // Broken roof beams
+                const beams = [
+                    { dx: 65,  dy: -50, len: 90, rot: -0.7 },
+                    { dx: 130, dy: -38, len: 70, rot:  0.55 },
+                    { dx: 20,  dy: -30, len: 50, rot: -0.3 },
+                ];
+                for (const b of beams) {
+                    ctx.save();
+                    ctx.translate(x + b.dx, gY + b.dy); ctx.rotate(b.rot);
+                    ctx.fillStyle = '#5c3317'; ctx.fillRect(-b.len/2, -4, b.len, 7);
+                    ctx.strokeStyle = '#3a1f0a'; ctx.lineWidth = 1;
+                    ctx.strokeRect(-b.len/2, -4, b.len, 7);
+                    ctx.restore();
+                }
+                // "DESTROYED" label
+                ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+                ctx.fillStyle = '#ff4444';
+                ctx.fillText('DESTROYED', x + width / 2, gY - 68);
+                // Lingering smoke
+                this.drawSmoke(ctx, x + 40,  gY - 35, 0.7);
+                this.drawSmoke(ctx, x + 140, gY - 28, 0.6);
+                ctx.restore();
+            }
+            draw(ctx) {
+                const { x, y, width, height, wallThickness, health, maxHealth } = this;
+                if (health <= 0) { this.drawRubble(ctx); return; }
+                const hp = health / maxHealth;
+                const lit = Math.floor(44 + hp * 20);
+                const wallColor = `hsl(28,48%,${lit}%)`;
+                // Main body
+                ctx.fillStyle = '#d4a574';
+                ctx.fillRect(x, y, width, height);
+                // Left / right walls
+                ctx.fillStyle = wallColor;
+                ctx.fillRect(x, y, wallThickness, height);
+                ctx.fillRect(x + width - wallThickness, y, wallThickness, height);
+                // Roof (darkens when on fire)
+                ctx.fillStyle = hp < 0.5 ? '#5a2a08' : '#8b4513';
+                ctx.beginPath();
+                ctx.moveTo(x - 12, y); ctx.lineTo(x + width + 12, y); ctx.lineTo(x + width / 2, y - 80);
+                ctx.closePath(); ctx.fill();
+                ctx.strokeStyle = '#5c2e00'; ctx.lineWidth = 2; ctx.stroke();
+                // Chimney
+                ctx.fillStyle = hp < 0.5 ? '#7b241c' : '#c0392b';
+                ctx.fillRect(x + width - 52, y - 78, 22, 52);
+                ctx.strokeStyle = '#922b21'; ctx.lineWidth = 1;
+                ctx.strokeRect(x + width - 52, y - 78, 22, 52);
+                // Door
+                ctx.fillStyle = hp < 0.5 ? '#3a1f0a' : '#5c3317';
+                ctx.fillRect(x + width / 2 - 22, y + height - 72, 44, 72);
+                ctx.beginPath(); ctx.arc(x + width / 2, y + height - 72, 22, Math.PI, 0); ctx.fill();
+                if (hp >= 0.5) {
+                    ctx.fillStyle = '#ffd700';
+                    ctx.beginPath(); ctx.arc(x + width / 2 + 14, y + height - 36, 4, 0, Math.PI * 2); ctx.fill();
+                }
+                // Windows — colour shifts red as damage increases
+                const lw = x + wallThickness + 8;
+                const rw = x + width - wallThickness - 52;
+                const winColor = hp < 0.5 ? '#ff5500' : hp < 0.75 ? '#ffbb55' : '#aaddff';
+                ctx.fillStyle = winColor;
+                ctx.fillRect(lw, y + 22, 44, 36);
+                ctx.fillRect(rw, y + 22, 44, 36);
+                ctx.strokeStyle = '#5c3317'; ctx.lineWidth = 2;
+                ctx.strokeRect(lw, y + 22, 44, 36);
+                ctx.strokeRect(rw, y + 22, 44, 36);
+                ctx.beginPath();
+                ctx.moveTo(lw + 22, y + 22); ctx.lineTo(lw + 22, y + 58);
+                ctx.moveTo(lw, y + 40);      ctx.lineTo(lw + 44, y + 40);
+                ctx.moveTo(rw + 22, y + 22); ctx.lineTo(rw + 22, y + 58);
+                ctx.moveTo(rw, y + 40);      ctx.lineTo(rw + 44, y + 40);
+                ctx.stroke();
+                // Body outline
+                ctx.strokeStyle = '#7a5c2e'; ctx.lineWidth = 2; ctx.strokeRect(x, y, width, height);
+                // --- Damage overlays (drawn on top in severity order) ---
+                if (hp < 0.75) {
+                    this.drawCracks(ctx, x, y, hp < 0.5);
+                    this.drawCracks(ctx, x + width - wallThickness, y, hp < 0.5);
+                }
+                // Chimney smoke starts at 75%
+                if (hp < 0.75) this.drawSmoke(ctx, x + width - 41, y - 78, hp < 0.5 ? 1.6 : 0.9);
+                // Window fire + wall smoke at 50%
+                if (hp < 0.5) {
+                    this.drawWindowFire(ctx, lw, y + 22, 44);
+                    this.drawWindowFire(ctx, rw, y + 22, 44);
+                    this.drawSmoke(ctx, x + wallThickness / 2, y, 1.0);
+                    this.drawSmoke(ctx, x + width - wallThickness / 2, y, 1.0);
+                }
+                // Roof fire + wall base fire at 25%
+                if (hp < 0.25) {
+                    this.drawRoofFire(ctx);
+                    this.drawFire(ctx, x, y, wallThickness, height);
+                    this.drawFire(ctx, x + width - wallThickness, y, wallThickness, height);
+                    this.drawSmoke(ctx, x + width / 2, y - 80, 2.0);
+                }
+                // Health bar
+                const barY = y - 22;
+                ctx.fillStyle = '#222'; ctx.fillRect(x, barY, width, 9);
+                ctx.fillStyle = hp > 0.5 ? '#27ae60' : hp > 0.25 ? '#e67e22' : '#e74c3c';
+                ctx.fillRect(x, barY, width * hp, 9);
+                ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(x, barY, width, 9);
+                ctx.save();
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+                ctx.fillText('House HP: ' + health, x + width / 2, barY - 3);
+                ctx.restore();
+            }
+        }
         // Collision detection
         function checkCollision(rect1, rect2) {
             return rect1.x < rect2.x + rect2.width &&
@@ -336,20 +644,32 @@
             constructor() {
                 this.canvas = document.getElementById('gameCanvas');
                 this.ctx = this.canvas.getContext('2d');
-                this.player = new Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT - GROUND_HEIGHT - 60);
+                this.cameraX = 0;
+                this.house = null;
+                this.player = new Player(500, SCREEN_HEIGHT - GROUND_HEIGHT - 60);
                 this.enemies = [];
                 this.spawnEnemies();
             }
             spawnEnemies() {
-                // Increase number and speed of enemies with level
+                this.house = new House();
                 this.enemies = [];
                 const numEnemies = 2 + gameState.level;
-                for (let i = 0; i < numEnemies; i++) {
-                    const left = 100 + i * 100;
-                    const right = left + 200;
-                    const y = SCREEN_HEIGHT - GROUND_HEIGHT - 50;
-                    const enemy = new Enemy(left, y, left, right);
-                    enemy.speed = 2 + Math.floor(gameState.level / 2);
+                const leftCount = Math.ceil(numEnemies / 2);
+                const rightCount = Math.floor(numEnemies / 2);
+                const y = SCREEN_HEIGHT - GROUND_HEIGHT - 50;
+                const speed = 2 + Math.floor(gameState.level / 2);
+                // Left corner enemies
+                for (let i = 0; i < leftCount; i++) {
+                    const x = 50 + i * 90;
+                    const enemy = new Enemy(x, y, 200);
+                    enemy.speed = speed;
+                    this.enemies.push(enemy);
+                }
+                // Right corner enemies
+                for (let i = 0; i < rightCount; i++) {
+                    const x = WORLD_WIDTH - 85 - i * 90;
+                    const enemy = new Enemy(x, y, WORLD_WIDTH - 200);
+                    enemy.speed = speed;
                     this.enemies.push(enemy);
                 }
                 // Reset fireballs
@@ -367,6 +687,8 @@
                     return;
                 }
                 this.player.update(gameState.keys);
+                this.house.update();
+                this.cameraX = Math.max(0, Math.min(this.player.x - SCREEN_WIDTH / 2, WORLD_WIDTH - SCREEN_WIDTH));
                 for (let enemy of this.enemies) {
                     enemy.update();
                 }
@@ -380,6 +702,23 @@
                 // Remove inactive fireballs
                 gameState.fireballs = gameState.fireballs.filter(f => f.active);
                 gameState.enemyFireballs = gameState.enemyFireballs.filter(f => f.active);
+                // House wall collision — player fireballs repair, enemy fireballs damage
+                if (!this.house.isDestroyed()) {
+                    const leftWall = this.house.getLeftWallBox();
+                    const rightWall = this.house.getRightWallBox();
+                    for (let fb of gameState.fireballs) {
+                        if (checkCollision(fb.getCollisionBox(), leftWall) || checkCollision(fb.getCollisionBox(), rightWall)) {
+                            fb.active = false;
+                            this.house.repair(10);
+                        }
+                    }
+                    for (let efb of gameState.enemyFireballs) {
+                        if (checkCollision(efb.getCollisionBox(), leftWall) || checkCollision(efb.getCollisionBox(), rightWall)) {
+                            efb.active = false;
+                            this.house.takeDamage(10);
+                        }
+                    }
+                }
                 // Fireball-enemy collision
                 for (let fireball of gameState.fireballs) {
                     for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -409,7 +748,7 @@
                 for (let enemy of this.enemies) {
                     const enemyBox = enemy.getCollisionBox();
                     if (checkCollision(playerBox, enemyBox)) {
-                        this.player.x = SCREEN_WIDTH / 2;
+                        this.player.x = WORLD_WIDTH / 2;
                         this.player.y = SCREEN_HEIGHT - GROUND_HEIGHT - 60;
                         gameState.score = Math.max(0, gameState.score - 10);
                     }
@@ -426,21 +765,28 @@
                 // Clear screen
                 this.ctx.fillStyle = COLORS.LIGHT_BLUE;
                 this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+                // Apply camera offset for all world elements
+                this.ctx.save();
+                this.ctx.translate(-this.cameraX, 0);
+
                 // Draw sky
                 this.ctx.fillStyle = COLORS.LIGHT_BLUE;
-                this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - GROUND_HEIGHT);
+                this.ctx.fillRect(0, 0, WORLD_WIDTH, SCREEN_HEIGHT - GROUND_HEIGHT);
                 // Draw ground
                 this.ctx.fillStyle = COLORS.GREEN;
-                this.ctx.fillRect(0, SCREEN_HEIGHT - GROUND_HEIGHT, SCREEN_WIDTH, GROUND_HEIGHT);
+                this.ctx.fillRect(0, SCREEN_HEIGHT - GROUND_HEIGHT, WORLD_WIDTH, GROUND_HEIGHT);
                 // Draw grass pattern
                 this.ctx.strokeStyle = COLORS.DARK_GREEN;
                 this.ctx.lineWidth = 2;
-                for (let x = 0; x < SCREEN_WIDTH; x += 50) {
+                for (let x = 0; x < WORLD_WIDTH; x += 50) {
                     this.ctx.beginPath();
                     this.ctx.moveTo(x, SCREEN_HEIGHT - GROUND_HEIGHT);
                     this.ctx.lineTo(x + 25, SCREEN_HEIGHT - GROUND_HEIGHT + 10);
                     this.ctx.stroke();
                 }
+                // Draw house
+                this.house.draw(this.ctx);
                 // Draw player
                 this.player.draw(this.ctx);
                 // Draw enemies
@@ -455,6 +801,9 @@
                 for (let efb of gameState.enemyFireballs) {
                     efb.draw(this.ctx);
                 }
+
+                this.ctx.restore(); // Remove camera transform — UI drawn in screen space below
+
                 // Update score display
                 document.getElementById('scoreValue').textContent = gameState.score;
                 // Draw lives
@@ -502,7 +851,7 @@
                 }
                 // Shoot fireball with SPACE
                 if ((e.key === ' ' || e.code === 'Space') && gameState.gameRunning && !gameState.showLevelBanner) {
-                    const player = game.gameInstance.player;
+                    const player = game.player;
                     const dir = player.direction === Direction.LEFT ? -1 : 1;
                     const fireball = new Fireball(
                         player.x + player.width/2 + dir*player.width/2,
