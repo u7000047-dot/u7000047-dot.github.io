@@ -128,7 +128,8 @@
             level: 1,
             levelBannerTimer: 0,
             showLevelBanner: true,
-            lives: 3
+            lives: 3,
+            maxLives: 3
         };
         // Direction enum
         const Direction = {
@@ -924,8 +925,8 @@
                         efb.active = false;
                         gameState.lives--;
                         if (gameState.lives <= 0) {
-                            // Reset level and lives
-                            gameState.lives = 3;
+                            // Reset level and lives to maxLives
+                            gameState.lives = gameState.maxLives;
                             gameState.showLevelBanner = true;
                             gameState.levelBannerTimer = 0;
                             this.spawnEnemies();
@@ -944,6 +945,10 @@
                 // Level clear check
                 if (this.enemies.length === 0) {
                     gameState.level++;
+                    // Every 10 levels increase the maximum lives by 1
+                    if (gameState.level % 10 === 0) {
+                        gameState.maxLives += 1;
+                    }
                     gameState.showLevelBanner = true;
                     gameState.levelBannerTimer = 0;
                     this.spawnEnemies();
