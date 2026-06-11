@@ -125,11 +125,13 @@
             fireballs: [],
             enemyFireballs: [],
             explosions: [],
+            miniSlimes: [],
             level: 1,
             levelBannerTimer: 0,
             showLevelBanner: true,
             lives: 3,
-            maxLives: 3
+            maxLives: 3,
+            bossRageFlash: 0
         };
         // Direction enum
         const Direction = {
@@ -328,6 +330,51 @@
                     width: this.radius * 2,
                     height: this.radius * 2
                 };
+            }
+        }
+        // MiniSlime — projectile spit by BossSlime, targets the house
+        class MiniSlime {
+            constructor(x, y, targetX, targetY) {
+                this.x = x;
+                this.y = y;
+                this.radius = 11;
+                this.active = true;
+                const dx = targetX - x;
+                const dy = targetY - y;
+                const mag = Math.sqrt(dx * dx + dy * dy) || 1;
+                const speed = 3 + Math.random() * 2;
+                this.vx = (dx / mag) * speed;
+                this.vy = (dy / mag) * speed;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                if (this.x < -120 || this.x > WORLD_WIDTH + 120 || this.y > SCREEN_HEIGHT + 80) {
+                    this.active = false;
+                }
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#66ee44';
+                ctx.shadowColor = '#116611';
+                ctx.shadowBlur = 10;
+                ctx.fill();
+                ctx.strokeStyle = '#228b22';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#fff';
+                ctx.beginPath(); ctx.arc(this.x - 3.5, this.y - 2, 3, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(this.x + 3.5, this.y - 2, 3, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#000';
+                ctx.beginPath(); ctx.arc(this.x - 2.5, this.y - 1, 1.5, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(this.x + 4.5, this.y - 1, 1.5, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+            }
+            getCollisionBox() {
+                return { x: this.x - this.radius, y: this.y - this.radius, width: this.radius * 2, height: this.radius * 2 };
             }
         }
         // Player Fireball class
@@ -697,6 +744,139 @@
                 return { x: this.x, y: this.y, width: this.width, height: this.height };
             }
         }
+        // BossSlime — giant green slime boss, 500 HP, moves from left toward house
+        class BossSlime {
+            constructor() {
+                this.width = 120;
+                this.height = 100;
+                this.x = -this.width - 20;
+                this.y = SCREEN_HEIGHT - GROUND_HEIGHT - this.height;
+                this.speed = 0.4;
+                this.maxHealth = 500;
+                this.health = 500;
+                this.spitCooldown = 180; // first spit at 3s, then every 5s
+                this.rageTriggered = false;
+                this.rageMode = false;
+                this.frame = 0;
+            }
+            getSpitCount() {
+                return Math.floor((this.maxHealth - this.health) / 100) + 1;
+            }
+            update() {
+                this.frame++;
+                const house = window.game.gameInstance.house;
+                if (this.x + this.width < house.x) {
+                    this.x += this.speed;
+                }
+                this.spitCooldown--;
+                if (this.spitCooldown <= 0) {
+                    this.spit();
+                    this.spitCooldown = 300;
+                }
+                if (this.health <= 100 && !this.rageTriggered) {
+                    this.rageTriggered = true;
+                    this.rageMode = true;
+                    this.spawnSkyRain();
+                    gameState.bossRageFlash = 90;
+                }
+            }
+            spit() {
+                if (this.rageMode) { this.spawnSkyRain(); return; }
+                const count = this.getSpitCount();
+                const house = window.game.gameInstance.house;
+                const groundY = SCREEN_HEIGHT - GROUND_HEIGHT - 11; // ground level (radius = 11)
+                const tx = house.x + house.width / 2;
+                for (let i = 0; i < count; i++) {
+                    const offsetX = i * 28; // space them out so they don't stack
+                    gameState.miniSlimes.push(new MiniSlime(
+                        this.x + this.width + offsetX, groundY,
+                        tx, groundY  // same Y = purely horizontal crawl
+                    ));
+                }
+            }
+            spawnSkyRain() {
+                const house = window.game.gameInstance.house;
+                const count = 12 + Math.floor(Math.random() * 6);
+                for (let i = 0; i < count; i++) {
+                    const startX = Math.random() * WORLD_WIDTH;
+                    const tx = house.x + house.width / 2 + (Math.random() - 0.5) * house.width * 3;
+                    gameState.miniSlimes.push(new MiniSlime(startX, -30 - Math.random() * 100, tx, house.y + house.height / 2));
+                }
+            }
+            draw(ctx) {
+                const cx = this.x + this.width / 2;
+                const wobble = Math.sin(this.frame * 0.08) * 5;
+                const cy = this.y + this.height / 2 + wobble;
+                ctx.save();
+                ctx.shadowColor = this.rageMode ? '#ff5500' : '#004400';
+                ctx.shadowBlur = this.rageMode ? 28 : 16;
+                ctx.beginPath();
+                ctx.ellipse(cx, cy, this.width / 2, this.height / 2 + Math.abs(wobble) * 0.3, 0, 0, Math.PI * 2);
+                ctx.fillStyle = this.rageMode ? '#33dd22' : '#44cc44';
+                ctx.fill();
+                ctx.strokeStyle = '#004400';
+                ctx.lineWidth = 4;
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+                // Blob bumps on top
+                for (const bx of [-this.width * 0.35, 0, this.width * 0.35]) {
+                    ctx.beginPath();
+                    ctx.ellipse(cx + bx, cy - this.height * 0.42, 20, 16, 0, 0, Math.PI * 2);
+                    ctx.fillStyle = '#55dd55';
+                    ctx.fill();
+                    ctx.strokeStyle = '#004400'; ctx.lineWidth = 2; ctx.stroke();
+                }
+                // Eyes
+                const eyeY = cy - this.height * 0.1;
+                ctx.fillStyle = '#fff';
+                ctx.beginPath(); ctx.arc(cx - 24, eyeY, 15, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx + 24, eyeY, 15, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#111';
+                ctx.beginPath(); ctx.arc(cx - 19, eyeY + 3, 8, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx + 29, eyeY + 3, 8, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#fff';
+                ctx.beginPath(); ctx.arc(cx - 22, eyeY - 3, 3, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx + 26, eyeY - 3, 3, 0, Math.PI * 2); ctx.fill();
+                // Angry brows when enraged
+                if (this.rageMode) {
+                    ctx.strokeStyle = '#cc2200'; ctx.lineWidth = 5;
+                    ctx.beginPath();
+                    ctx.moveTo(cx - 40, eyeY - 18); ctx.lineTo(cx - 8, eyeY - 10);
+                    ctx.moveTo(cx + 8,  eyeY - 10); ctx.lineTo(cx + 40, eyeY - 18);
+                    ctx.stroke();
+                }
+                // Mouth + drool
+                ctx.strokeStyle = '#003300'; ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(cx - 28, cy + this.height * 0.28);
+                ctx.quadraticCurveTo(cx, cy + this.height * 0.44, cx + 28, cy + this.height * 0.28);
+                ctx.stroke();
+                ctx.fillStyle = '#44dd44';
+                ctx.beginPath(); ctx.arc(cx - 8,  cy + this.height * 0.49, 5, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx + 12, cy + this.height * 0.53, 4, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+                // Health bar
+                const barW = this.width + 30;
+                const barX = cx - barW / 2;
+                const barY = this.y - 32;
+                const hp = this.health / this.maxHealth;
+                ctx.fillStyle = '#222'; ctx.fillRect(barX, barY, barW, 14);
+                ctx.fillStyle = hp > 0.4 ? '#00cc00' : hp > 0.2 ? '#ddcc00' : '#dd2200';
+                ctx.fillRect(barX, barY, barW * hp, 14);
+                ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5; ctx.strokeRect(barX, barY, barW, 14);
+                ctx.save();
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+                ctx.fillText('BOSS HP: ' + this.health, barX + barW / 2, barY - 5);
+                if (this.rageMode) {
+                    ctx.fillStyle = '#ff4400'; ctx.font = 'bold 15px Arial';
+                    ctx.fillText('!! ENRAGED !!', barX + barW / 2, barY - 22);
+                }
+                ctx.restore();
+            }
+            getCollisionBox() {
+                return { x: this.x, y: this.y, width: this.width, height: this.height };
+            }
+        }
         // Explosion visual effect used when chaser hits the house
         class Explosion {
             constructor(x, y, opts = {}) {
@@ -837,9 +1017,14 @@
                     chaser.speed = speed;
                     this.enemies.push(chaser);
                 }
-                // Reset fireballs
+                // Boss slime — spawns only on every 5th level
+                if (gameState.level % 5 === 0) {
+                    this.enemies.push(new BossSlime());
+                }
+                // Reset fireballs and mini-slimes
                 gameState.fireballs = [];
                 gameState.enemyFireballs = [];
+                gameState.miniSlimes = [];
             }
             update() {
                 if (!gameState.gameRunning) return;
@@ -857,7 +1042,7 @@
                 for (let enemy of this.enemies) {
                     enemy.update();
                 }
-                // ChaserEnemy reaching the house: explode and damage house by 20
+                // ChaserEnemy reaching the house: explode and damage house by 10
                 for (let i = this.enemies.length - 1; i >= 0; i--) {
                     const e = this.enemies[i];
                     if (e instanceof ChaserEnemy) {
@@ -868,7 +1053,19 @@
                             const ey = e.y + e.height / 2;
                             gameState.explosions.push(new Explosion(ex, ey));
                             this.enemies.splice(i, 1);
-                            this.house.takeDamage(20);
+                            this.house.takeDamage(10);
+                        }
+                    }
+                }
+                // BossSlime reaching the house: massive explosion + heavy damage
+                for (let i = this.enemies.length - 1; i >= 0; i--) {
+                    const e = this.enemies[i];
+                    if (e instanceof BossSlime) {
+                        const houseBox = { x: this.house.x, y: this.house.y, width: this.house.width, height: this.house.height };
+                        if (checkCollision(e.getCollisionBox(), houseBox)) {
+                            gameState.explosions.push(new Explosion(e.x + e.width / 2, e.y + e.height / 2, { count: 80, duration: 120 }));
+                            this.enemies.splice(i, 1);
+                            this.house.takeDamage(50);
                         }
                     }
                 }
@@ -882,6 +1079,51 @@
                 // Update explosions
                 for (let exp of gameState.explosions) exp.update();
                 gameState.explosions = gameState.explosions.filter(e => !e.done);
+                // Update mini-slimes
+                for (let ms of gameState.miniSlimes) ms.update();
+                // Mini-slime hitting house
+                if (!this.house.isDestroyed()) {
+                    const houseBox = { x: this.house.x, y: this.house.y, width: this.house.width, height: this.house.height };
+                    for (let i = gameState.miniSlimes.length - 1; i >= 0; i--) {
+                        const ms = gameState.miniSlimes[i];
+                        if (!ms.active || checkCollision(ms.getCollisionBox(), houseBox)) {
+                            if (ms.active) {
+                                gameState.explosions.push(new Explosion(ms.x, ms.y, { count: 18, duration: 45 }));
+                                this.house.takeDamage(15);
+                            }
+                            gameState.miniSlimes.splice(i, 1);
+                        }
+                    }
+                } else {
+                    gameState.miniSlimes = gameState.miniSlimes.filter(ms => ms.active);
+                }
+                // Player-miniSlime collision
+                for (let i = gameState.miniSlimes.length - 1; i >= 0; i--) {
+                    if (checkCollision(this.player.getCollisionBox(), gameState.miniSlimes[i].getCollisionBox())) {
+                        gameState.explosions.push(new Explosion(gameState.miniSlimes[i].x, gameState.miniSlimes[i].y, { count: 12, duration: 35 }));
+                        gameState.miniSlimes.splice(i, 1);
+                        gameState.lives--;
+                        if (gameState.lives <= 0) {
+                            gameState.lives = gameState.maxLives;
+                            gameState.showLevelBanner = true;
+                            gameState.levelBannerTimer = 0;
+                            this.spawnEnemies();
+                        }
+                    }
+                }
+                // Fireball-miniSlime collision
+                for (let fireball of gameState.fireballs) {
+                    for (let i = gameState.miniSlimes.length - 1; i >= 0; i--) {
+                        if (fireball.active && checkCollision(fireball.getCollisionBox(), gameState.miniSlimes[i].getCollisionBox())) {
+                            fireball.active = false;
+                            gameState.miniSlimes.splice(i, 1);
+                            gameState.score += 10;
+                            break;
+                        }
+                    }
+                }
+                // Boss rage flash countdown
+                if (gameState.bossRageFlash > 0) gameState.bossRageFlash--;
                 // Remove inactive fireballs
                 gameState.fireballs = gameState.fireballs.filter(f => f.active);
                 gameState.enemyFireballs = gameState.enemyFireballs.filter(f => f.active);
@@ -907,13 +1149,14 @@
                     for (let i = this.enemies.length - 1; i >= 0; i--) {
                         const enemy = this.enemies[i];
                         if (checkCollision(fireball.getCollisionBox(), enemy.getCollisionBox())) {
-                            // hit: reduce enemy health by 1 (each fireball counts as one hit)
-                            enemy.health = (enemy.health || enemy.maxHealth || 2) - 1;
+                            const hitDmg = (enemy instanceof BossSlime) ? 10 : 1;
+                            enemy.health = (enemy.health || enemy.maxHealth || 2) - hitDmg;
                             fireball.active = false;
                             // if enemy dead, remove and award score
                             if (enemy.health <= 0) {
+                                const pts = (enemy instanceof BossSlime) ? 500 : 50;
                                 this.enemies.splice(i, 1);
-                                gameState.score += 50;
+                                gameState.score += pts;
                             }
                         }
                     }
@@ -925,7 +1168,7 @@
                         efb.active = false;
                         gameState.lives--;
                         if (gameState.lives <= 0) {
-                            // Reset level and lives to maxLives
+                            // Reset level and lives
                             gameState.lives = gameState.maxLives;
                             gameState.showLevelBanner = true;
                             gameState.levelBannerTimer = 0;
@@ -942,12 +1185,12 @@
                         gameState.score = Math.max(0, gameState.score - 10);
                     }
                 }
-                // Level clear check
-                if (this.enemies.length === 0) {
+                // Level clear check — wait for boss, all enemies, and all mini-slimes to be gone
+                if (this.enemies.length === 0 && gameState.miniSlimes.length === 0) {
                     gameState.level++;
-                    // Every 10 levels increase the maximum lives by 1
                     if (gameState.level % 10 === 0) {
                         gameState.maxLives += 1;
+                        gameState.lives = gameState.maxLives;
                     }
                     gameState.showLevelBanner = true;
                     gameState.levelBannerTimer = 0;
@@ -998,6 +1241,10 @@
                 for (let exp of gameState.explosions) {
                     exp.draw(this.ctx);
                 }
+                // Draw mini-slimes
+                for (let ms of gameState.miniSlimes) {
+                    ms.draw(this.ctx);
+                }
 
                 this.ctx.restore(); // Remove camera transform — UI drawn in screen space below
 
@@ -1010,6 +1257,22 @@
                 this.ctx.textAlign = 'left';
                 this.ctx.fillText('Lives: ' + gameState.lives, 20, 60);
                 this.ctx.restore();
+                // Boss rage screen flash
+                if (gameState.bossRageFlash > 0) {
+                    const flashAlpha = (gameState.bossRageFlash / 90) * 0.45;
+                    this.ctx.save();
+                    this.ctx.fillStyle = `rgba(255,50,0,${flashAlpha.toFixed(3)})`;
+                    this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+                    if (gameState.bossRageFlash > 30) {
+                        const textAlpha = Math.min(1, (gameState.bossRageFlash - 30) / 30);
+                        this.ctx.globalAlpha = textAlpha;
+                        this.ctx.fillStyle = '#ffdd00';
+                        this.ctx.font = 'bold 54px Arial';
+                        this.ctx.textAlign = 'center';
+                        this.ctx.fillText('!! BOSS ENRAGED !!', SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+                    }
+                    this.ctx.restore();
+                }
                 // Draw level banner
                 if (gameState.showLevelBanner) {
                     this.ctx.save();
