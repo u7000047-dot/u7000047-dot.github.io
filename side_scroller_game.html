@@ -86,16 +86,184 @@
         #gameOver button:hover {
             background: #764ba2;
         }
+        #pauseMenu {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(10, 10, 30, 0.95);
+            color: white;
+            padding: 40px 48px;
+            border-radius: 12px;
+            text-align: center;
+            display: none;
+            z-index: 200;
+            min-width: 320px;
+            border: 2px solid #667eea;
+            box-shadow: 0 0 40px rgba(102, 126, 234, 0.4);
+        }
+        #pauseMenu h2 {
+            font-size: 30px;
+            margin-bottom: 28px;
+            color: #ffd700;
+            letter-spacing: 2px;
+        }
+        #pauseMenu button {
+            display: block;
+            width: 100%;
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-bottom: 12px;
+            transition: background 0.2s, transform 0.1s;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+        }
+        #pauseMenu button:hover {
+            background: #764ba2;
+            transform: scale(1.02);
+        }
+        #pauseMenu button:last-of-type {
+            margin-bottom: 0;
+        }
+        #pauseMenu .btn-danger {
+            background: #c0392b;
+        }
+        #pauseMenu .btn-danger:hover {
+            background: #922b21;
+        }
+        #pauseMenu .btn-success {
+            background: #27ae60;
+        }
+        #pauseMenu .btn-success:hover {
+            background: #1e8449;
+        }
+        #importFileInput {
+            display: none;
+        }
+        #statsBtn {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(30, 30, 60, 0.88);
+            color: #ffd700;
+            border: 2px solid #ffd700;
+            padding: 6px 18px;
+            font-size: 15px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: Arial, sans-serif;
+            z-index: 10;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+        #statsBtn:hover { background: rgba(60, 50, 10, 0.95); }
+        #statsBadge {
+            display: none;
+            background: #ff4422;
+            color: #fff;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            line-height: 20px;
+            text-align: center;
+            font-size: 12px;
+            margin-left: 7px;
+            vertical-align: middle;
+            font-weight: bold;
+        }
+        #statsMenu {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(10, 10, 30, 0.97);
+            color: white;
+            padding: 36px 44px;
+            border-radius: 12px;
+            text-align: center;
+            display: none;
+            z-index: 210;
+            min-width: 380px;
+            border: 2px solid #ffd700;
+            box-shadow: 0 0 40px rgba(255, 215, 0, 0.25);
+        }
+        #statsMenu h2 { font-size: 26px; margin-bottom: 6px; color: #ffd700; }
+        #statsMenu .pts { font-size: 14px; color: #aaa; margin-bottom: 22px; }
+        #statsMenu .pts span { color: #ffd700; font-weight: bold; font-size: 16px; }
+        #statsMenu .stat-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+            font-size: 15px;
+            gap: 10px;
+        }
+        #statsMenu .stat-label { text-align: left; flex: 1; }
+        #statsMenu .stat-val { width: 52px; text-align: center; color: #7ec8e3; font-weight: bold; font-size: 16px; }
+        #statsMenu .upg-btn {
+            background: #27ae60; color: white; border: none;
+            padding: 5px 14px; border-radius: 5px; cursor: pointer;
+            font-size: 13px; font-weight: bold; transition: background 0.2s; white-space: nowrap;
+        }
+        #statsMenu .upg-btn:hover:not(:disabled) { background: #1e8449; }
+        #statsMenu .upg-btn:disabled { background: #444; color: #888; cursor: default; }
+        #statsMenu .close-btn {
+            margin-top: 22px; background: #667eea; color: white; border: none;
+            padding: 10px 34px; border-radius: 6px; cursor: pointer;
+            font-size: 15px; font-weight: bold; transition: background 0.2s;
+        }
+        #statsMenu .close-btn:hover { background: #764ba2; }
     </style>
 </head>
 <body>
     <div id="gameContainer">
         <canvas id="gameCanvas" width="1000" height="600"></canvas>
         <div id="score" class="info">Score: <span id="scoreValue">0</span></div>
-        <div id="controls" class="info">A/D: Move | W: Jump | ESC: Quit</div>        <div id="version" class="info">v1.0</div>        <div id="gameOver">
+        <button id="statsBtn" onclick="showStatsMenu()">Stats <span id="statsBadge">0</span></button>
+        <div id="controls" class="info">A/D: Move | W: Jump | Space: Shoot | ESC: Menu</div>        <div id="version" class="info">v1.0</div>        <div id="statsMenu">
+            <h2>&#9650; Stats &amp; Upgrades</h2>
+            <div class="pts">Upgrade Points: <span id="upgradePointsDisplay">0</span></div>
+            <div class="stat-row">
+                <span class="stat-label">&#128293; Fireball Damage</span>
+                <span class="stat-val" id="statDamage">1</span>
+                <button class="upg-btn" onclick="upgradeStat('damage')">+1 &nbsp;(1pt)</button>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">&#10084; Max Lives</span>
+                <span class="stat-val" id="statLives">3</span>
+                <button class="upg-btn" onclick="upgradeStat('playerHealth')">+1 &nbsp;(1pt)</button>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">&#127968; House Max HP</span>
+                <span class="stat-val" id="statHouseHP">100</span>
+                <button class="upg-btn" onclick="upgradeStat('houseHealth')">+20 (1pt)</button>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">&#128694; Move Speed</span>
+                <span class="stat-val" id="statSpeed">8</span>
+                <button class="upg-btn" onclick="upgradeStat('speed')">+1 &nbsp;(1pt)</button>
+            </div>
+            <button class="close-btn" onclick="closeStatsMenu()">Close</button>
+        </div>
+        <div id="gameOver">
             <h1>Game Over!</h1>
             <p>Final Score: <span id="finalScore">0</span></p>
             <button onclick="location.reload()">Play Again</button>
+        </div>
+        <div id="pauseMenu">
+            <h2>&#9646;&#9646; PAUSED</h2>
+            <button onclick="resumeGame()">&#9654; Resume</button>
+            <button class="btn-danger" onclick="resetGame()">&#8635; Reset Game</button>
+            <button class="btn-success" onclick="exportGameState()">&#8659; Export State</button>
+            <button onclick="document.getElementById('importFileInput').click()">&#8657; Import State</button>
+            <input type="file" id="importFileInput" accept=".json" onchange="importGameState(event)">
         </div>
     </div>
     <script>
@@ -121,6 +289,8 @@
         const gameState = {
             score: 0,
             gameRunning: true,
+            paused: false,
+            statsOpen: false,
             keys: {},
             fireballs: [],
             enemyFireballs: [],
@@ -131,7 +301,14 @@
             showLevelBanner: true,
             lives: 3,
             maxLives: 3,
-            bossRageFlash: 0
+            bossRageFlash: 0,
+            upgradePoints: 0,
+            stats: {
+                damage: 1,       // fireball hits per shot vs normal enemies
+                playerHealth: 0, // bonus max lives
+                houseHealth: 0,  // bonus house max HP tiers (+20 each)
+                speed: 0         // bonus move speed
+            }
         };
         // Direction enum
         const Direction = {
@@ -167,13 +344,14 @@
             }
             handleInput(keys) {
                 this.velocityX = 0;
+                const effectiveSpeed = this.maxSpeed + gameState.stats.speed;
                 if (keys['a'] || keys['A']) {
-                    this.velocityX = -this.maxSpeed;
+                    this.velocityX = -effectiveSpeed;
                     this.direction = Direction.LEFT;
                     this.currentImage = this.imageLeft;
                 }
                 if (keys['d'] || keys['D']) {
-                    this.velocityX = this.maxSpeed;
+                    this.velocityX = effectiveSpeed;
                     this.direction = Direction.RIGHT;
                     this.currentImage = this.imageRight;
                 }
@@ -990,6 +1168,9 @@
             }
             spawnEnemies() {
                 this.house = new House();
+                const bonusHP = gameState.stats.houseHealth * 20;
+                this.house.maxHealth = 100 + bonusHP;
+                this.house.health = 100 + bonusHP;
                 this.enemies = [];
                 const numEnemies = 2 + gameState.level;
                 const leftCount = Math.ceil(numEnemies / 2);
@@ -1149,7 +1330,7 @@
                     for (let i = this.enemies.length - 1; i >= 0; i--) {
                         const enemy = this.enemies[i];
                         if (checkCollision(fireball.getCollisionBox(), enemy.getCollisionBox())) {
-                            const hitDmg = (enemy instanceof BossSlime) ? 10 : 1;
+                            const hitDmg = (enemy instanceof BossSlime) ? 10 * gameState.stats.damage : gameState.stats.damage;
                             enemy.health = (enemy.health || enemy.maxHealth || 2) - hitDmg;
                             fireball.active = false;
                             // if enemy dead, remove and award score
@@ -1191,6 +1372,10 @@
                     if (gameState.level % 10 === 0) {
                         gameState.maxLives += 1;
                         gameState.lives = gameState.maxLives;
+                    }
+                    if (gameState.level % 5 === 0) {
+                        gameState.upgradePoints += gameState.level / 5;
+                        updateStatsBadge();
                     }
                     gameState.showLevelBanner = true;
                     gameState.levelBannerTimer = 0;
@@ -1294,6 +1479,170 @@
                 }, 1000 / FPS);
             }
         }
+        // --- Pause Menu ---
+        function showPauseMenu() {
+            gameState.gameRunning = false;
+            gameState.paused = true;
+            document.getElementById('pauseMenu').style.display = 'block';
+        }
+        function resumeGame() {
+            document.getElementById('pauseMenu').style.display = 'none';
+            gameState.paused = false;
+            gameState.gameRunning = true;
+        }
+        function resetGame() {
+            document.getElementById('pauseMenu').style.display = 'none';
+            gameState.score = 0;
+            gameState.level = 1;
+            gameState.lives = 3;
+            gameState.maxLives = 3;
+            gameState.fireballs = [];
+            gameState.enemyFireballs = [];
+            gameState.explosions = [];
+            gameState.miniSlimes = [];
+            gameState.bossRageFlash = 0;
+            gameState.showLevelBanner = true;
+            gameState.levelBannerTimer = 0;
+            gameState.paused = false;
+            gameState.statsOpen = false;
+            gameState.upgradePoints = 0;
+            gameState.stats = { damage: 1, playerHealth: 0, houseHealth: 0, speed: 0 };
+            gameState.gameRunning = true;
+            const game = window.game.gameInstance;
+            game.player = new Player(500, SCREEN_HEIGHT - GROUND_HEIGHT - 60);
+            game.spawnEnemies();
+            document.getElementById('scoreValue').textContent = 0;
+            updateStatsBadge();
+        }
+        function exportGameState() {
+            const game = window.game.gameInstance;
+            const state = {
+                score: gameState.score,
+                level: gameState.level,
+                lives: gameState.lives,
+                maxLives: gameState.maxLives,
+                upgradePoints: gameState.upgradePoints,
+                stats: { ...gameState.stats },
+                player: {
+                    x: game.player.x,
+                    y: game.player.y,
+                    direction: game.player.direction
+                },
+                house: {
+                    health: game.house.health
+                }
+            };
+            const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `game_save_level${gameState.level}_score${gameState.score}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        function importGameState(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const state = JSON.parse(e.target.result);
+                    if (typeof state.score !== 'number' || typeof state.level !== 'number') {
+                        alert('Invalid save file.');
+                        return;
+                    }
+                    gameState.score = state.score;
+                    gameState.level = state.level;
+                    gameState.lives = state.lives ?? 3;
+                    gameState.maxLives = state.maxLives ?? 3;
+                    gameState.upgradePoints = state.upgradePoints ?? 0;
+                    gameState.stats = {
+                        damage:       state.stats?.damage       ?? 1,
+                        playerHealth: state.stats?.playerHealth ?? 0,
+                        houseHealth:  state.stats?.houseHealth  ?? 0,
+                        speed:        state.stats?.speed        ?? 0
+                    };
+                    gameState.fireballs = [];
+                    gameState.enemyFireballs = [];
+                    gameState.explosions = [];
+                    gameState.miniSlimes = [];
+                    gameState.bossRageFlash = 0;
+                    gameState.showLevelBanner = true;
+                    gameState.levelBannerTimer = 0;
+                    gameState.paused = false;
+                    gameState.statsOpen = false;
+                    gameState.gameRunning = true;
+                    const game = window.game.gameInstance;
+                    const px = state.player?.x ?? 500;
+                    const py = state.player?.y ?? (SCREEN_HEIGHT - GROUND_HEIGHT - 60);
+                    game.player = new Player(px, py);
+                    if (state.player?.direction !== undefined) game.player.direction = state.player.direction;
+                    game.spawnEnemies();
+                    if (state.house?.health !== undefined) game.house.health = state.house.health;
+                    document.getElementById('scoreValue').textContent = gameState.score;
+                    document.getElementById('pauseMenu').style.display = 'none';
+                    updateStatsBadge();
+                } catch (err) {
+                    alert('Failed to load save: ' + err.message);
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+
+        // --- Stats Menu ---
+        function updateStatsBadge() {
+            const badge = document.getElementById('statsBadge');
+            if (gameState.upgradePoints > 0) {
+                badge.textContent = gameState.upgradePoints;
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+        function updateStatsDisplay() {
+            document.getElementById('upgradePointsDisplay').textContent = gameState.upgradePoints;
+            document.getElementById('statDamage').textContent = gameState.stats.damage;
+            document.getElementById('statLives').textContent = gameState.maxLives;
+            document.getElementById('statHouseHP').textContent = 100 + gameState.stats.houseHealth * 20;
+            document.getElementById('statSpeed').textContent = 8 + gameState.stats.speed;
+            const canUpgrade = gameState.upgradePoints > 0;
+            document.querySelectorAll('#statsMenu .upg-btn').forEach(btn => { btn.disabled = !canUpgrade; });
+            updateStatsBadge();
+        }
+        function showStatsMenu() {
+            gameState.statsOpen = true;
+            if (!gameState.paused) gameState.gameRunning = false;
+            updateStatsDisplay();
+            document.getElementById('statsMenu').style.display = 'block';
+        }
+        function closeStatsMenu() {
+            document.getElementById('statsMenu').style.display = 'none';
+            gameState.statsOpen = false;
+            if (!gameState.paused) gameState.gameRunning = true;
+        }
+        function upgradeStat(stat) {
+            if (gameState.upgradePoints <= 0) return;
+            gameState.upgradePoints--;
+            if (stat === 'damage') {
+                gameState.stats.damage++;
+            } else if (stat === 'playerHealth') {
+                gameState.stats.playerHealth++;
+                gameState.maxLives++;
+                gameState.lives++;
+            } else if (stat === 'houseHealth') {
+                gameState.stats.houseHealth++;
+                const game = window.game.gameInstance;
+                if (game && game.house) {
+                    game.house.maxHealth += 20;
+                    game.house.health = Math.min(game.house.health + 20, game.house.maxHealth);
+                }
+            } else if (stat === 'speed') {
+                gameState.stats.speed++;
+            }
+            updateStatsDisplay();
+        }
+
         // Start game
         window.addEventListener('load', () => {
             window.game = {};
@@ -1305,9 +1654,11 @@
             document.addEventListener('keydown', (e) => {
                 gameState.keys[e.key] = true;
                 if (e.key === 'Escape') {
-                    gameState.gameRunning = false;
-                    document.getElementById('gameOver').style.display = 'block';
-                    document.getElementById('finalScore').textContent = gameState.score;
+                    if (gameState.paused) {
+                        resumeGame();
+                    } else {
+                        showPauseMenu();
+                    }
                 }
                 // Shoot fireball with SPACE
                 if ((e.key === ' ' || e.code === 'Space') && gameState.gameRunning && !gameState.showLevelBanner) {
