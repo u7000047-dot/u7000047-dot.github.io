@@ -1838,11 +1838,21 @@
                         resolve();
                     },
                     undefined,
-                    (err) => reject(err)
+                    (err) => {
+                        sceneReadyPromise = null; // allow a later call to retry instead of staying rejected forever
+                        reject(err);
+                    }
                 );
             });
             return sceneReadyPromise;
         }
+
+        // Start fetching/parsing the (~23MB) model as soon as the page loads, so it's already
+        // in memory well before level 11 — the multi-second download would otherwise stall
+        // the cutscene with a blank screen if only started when the cutscene is triggered.
+        loadCharizardScene().catch((err) => {
+            console.error('Charizard model preload failed (will retry on first cutscene trigger):', err);
+        });
 
         window.playCharizardCutscene = async function playCharizardCutscene(onComplete) {
             const overlay = document.getElementById('charizardCutscene');
