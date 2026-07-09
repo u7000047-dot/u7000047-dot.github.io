@@ -220,7 +220,56 @@
             font-size: 15px; font-weight: bold; transition: background 0.2s;
         }
         #statsMenu .close-btn:hover { background: #764ba2; }
+        #charizardCutscene {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: none;
+            z-index: 300;
+        }
+        #charizardCutscene canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #charizardGlow {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at 50% 55%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.55) 30%, rgba(255,255,255,0) 68%);
+            opacity: 0;
+            pointer-events: none;
+        }
+        #charizardCaption {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 84%;
+            text-align: center;
+            color: #ffbf70;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+            font-size: 40px;
+            text-shadow: 0 0 14px rgba(255, 140, 0, 0.65), 2px 2px 4px rgba(0, 0, 0, 0.8);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 500ms ease-in;
+        }
     </style>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
 </head>
 <body>
     <div id="gameContainer">
@@ -265,6 +314,11 @@
             <button onclick="document.getElementById('importFileInput').click()">&#8657; Import State</button>
             <input type="file" id="importFileInput" accept=".json" onchange="importGameState(event)">
         </div>
+        <div id="charizardCutscene">
+            <canvas id="charizardCanvas" width="1000" height="600"></canvas>
+            <div id="charizardGlow"></div>
+            <div id="charizardCaption">Congratulations! Charmander evolved into Charizard!</div>
+        </div>
     </div>
     <script>
         // Game Constants
@@ -291,6 +345,7 @@
             gameRunning: true,
             paused: false,
             statsOpen: false,
+            cutsceneActive: false,
             keys: {},
             fireballs: [],
             enemyFireballs: [],
@@ -1164,6 +1219,7 @@
                 this.house = null;
                 this.player = new Player(500, SCREEN_HEIGHT - GROUND_HEIGHT - 60);
                 this.enemies = [];
+                this.spawnQueue = [];
                 this.spawnEnemies();
             }
             spawnEnemies() {
@@ -1172,40 +1228,47 @@
                 this.house.maxHealth = 100 + bonusHP;
                 this.house.health = 100 + bonusHP;
                 this.enemies = [];
+                this.spawnQueue = [];
+
                 const numEnemies = 2 + gameState.level;
                 const leftCount = Math.ceil(numEnemies / 2);
                 const rightCount = Math.floor(numEnemies / 2);
-                const y = SCREEN_HEIGHT - GROUND_HEIGHT - 50;
-                const speed = 2 + Math.floor(gameState.level / 2);
-                // Left corner enemies
+                // Spread spawns randomly across 5–10 seconds (after the level banner)
+                const spawnWindow = Math.floor(FPS * (5 + Math.random() * 5));
+
                 for (let i = 0; i < leftCount; i++) {
-                    const x = 50 + i * 90;
-                    const enemy = new Enemy(x, y, 200);
-                    enemy.speed = speed;
-                    this.enemies.push(enemy);
+                    this.spawnQueue.push({ delay: Math.floor(Math.random() * spawnWindow), type: 'enemy', side: 'left' });
                 }
-                // Right corner enemies
                 for (let i = 0; i < rightCount; i++) {
-                    const x = WORLD_WIDTH - 85 - i * 90;
-                    const enemy = new Enemy(x, y, WORLD_WIDTH - 200);
-                    enemy.speed = speed;
-                    this.enemies.push(enemy);
+                    this.spawnQueue.push({ delay: Math.floor(Math.random() * spawnWindow), type: 'enemy', side: 'right' });
                 }
-                // Chaser enemies (triangle) — cannot shoot, move directly toward player
                 for (let i = 0; i < rightCount; i++) {
-                    const cx = WORLD_WIDTH - 200 - i * 120;
-                    const chaser = new ChaserEnemy(cx, y - 20);
-                    chaser.speed = speed;
-                    this.enemies.push(chaser);
+                    this.spawnQueue.push({ delay: Math.floor(Math.random() * spawnWindow), type: 'chaser', side: Math.random() < 0.5 ? 'left' : 'right' });
                 }
-                // Boss slime — spawns only on every 5th level
+
+                // Boss slime walks in from off-screen left — spawn immediately
                 if (gameState.level % 5 === 0) {
                     this.enemies.push(new BossSlime());
                 }
-                // Reset fireballs and mini-slimes
                 gameState.fireballs = [];
                 gameState.enemyFireballs = [];
                 gameState.miniSlimes = [];
+            }
+            _spawnEnemy(entry) {
+                const y = SCREEN_HEIGHT - GROUND_HEIGHT - 50;
+                const speed = 2 + Math.floor(gameState.level / 2);
+                if (entry.type === 'enemy') {
+                    const x      = entry.side === 'left' ? -35 : WORLD_WIDTH;
+                    const patrol = entry.side === 'left' ? 200 : WORLD_WIDTH - 200;
+                    const e = new Enemy(x, y, patrol);
+                    e.speed = speed;
+                    this.enemies.push(e);
+                } else {
+                    const x = entry.side === 'left' ? -40 : WORLD_WIDTH;
+                    const c = new ChaserEnemy(x, y - 20);
+                    c.speed = speed;
+                    this.enemies.push(c);
+                }
             }
             update() {
                 if (!gameState.gameRunning) return;
@@ -1216,6 +1279,14 @@
                         gameState.showLevelBanner = false;
                     }
                     return;
+                }
+                // Drain spawn queue — delays count down after the banner clears
+                for (let i = this.spawnQueue.length - 1; i >= 0; i--) {
+                    this.spawnQueue[i].delay--;
+                    if (this.spawnQueue[i].delay <= 0) {
+                        this._spawnEnemy(this.spawnQueue[i]);
+                        this.spawnQueue.splice(i, 1);
+                    }
                 }
                 this.player.update(gameState.keys);
                 this.house.update();
@@ -1366,8 +1437,8 @@
                         gameState.score = Math.max(0, gameState.score - 10);
                     }
                 }
-                // Level clear check — wait for boss, all enemies, and all mini-slimes to be gone
-                if (this.enemies.length === 0 && gameState.miniSlimes.length === 0) {
+                // Level clear check — all queued spawns must have appeared and been defeated
+                if (this.enemies.length === 0 && this.spawnQueue.length === 0 && gameState.miniSlimes.length === 0) {
                     gameState.level++;
                     if (gameState.level % 10 === 0) {
                         gameState.maxLives += 1;
@@ -1379,7 +1450,17 @@
                     }
                     gameState.showLevelBanner = true;
                     gameState.levelBannerTimer = 0;
-                    this.spawnEnemies();
+                    if (gameState.level === 11 && typeof window.playCharizardCutscene === 'function') {
+                        gameState.gameRunning = false;
+                        gameState.cutsceneActive = true;
+                        window.playCharizardCutscene(() => {
+                            gameState.cutsceneActive = false;
+                            gameState.gameRunning = true;
+                            this.spawnEnemies();
+                        });
+                    } else {
+                        this.spawnEnemies();
+                    }
                 }
             }
             draw() {
@@ -1652,6 +1733,7 @@
 
             // Move event listeners here so 'game' is defined
             document.addEventListener('keydown', (e) => {
+                if (gameState.cutsceneActive) return;
                 gameState.keys[e.key] = true;
                 if (e.key === 'Escape') {
                     if (gameState.paused) {
@@ -1659,6 +1741,17 @@
                     } else {
                         showPauseMenu();
                     }
+                }
+                // Debug: replay the Charizard cutscene on demand while the pause menu is open
+                if ((e.key === 'c' || e.key === 'C') && gameState.paused && typeof window.playCharizardCutscene === 'function') {
+                    document.getElementById('pauseMenu').style.display = 'none';
+                    gameState.paused = false;
+                    gameState.cutsceneActive = true;
+                    gameState.gameRunning = false;
+                    window.playCharizardCutscene(() => {
+                        gameState.cutsceneActive = false;
+                        gameState.gameRunning = true;
+                    });
                 }
                 // Shoot fireball with SPACE
                 if ((e.key === ' ' || e.code === 'Space') && gameState.gameRunning && !gameState.showLevelBanner) {
@@ -1676,6 +1769,161 @@
                 gameState.keys[e.key] = false;
             });
         });
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        const CHARIZARD_GLB_PATH = 'charizard-006-sv/source/Charizard006SV.glb';
+        // Opening reveal: white->black background fade + camera pan down from sky to Charizard (close-up).
+        const REVEAL_DURATION_MS = 2000;
+        // 180 degree orbit while the camera zooms back out to its normal distance.
+        const ORBIT_DURATION_MS = 6000;
+        // Closing caption, held after the orbit finishes.
+        const CAPTION_DURATION_MS = 4000;
+        const CUTSCENE_DURATION_MS = REVEAL_DURATION_MS + ORBIT_DURATION_MS + CAPTION_DURATION_MS;
+        // The glow flash fades out on its own schedule, independent of (and longer than) the reveal phase.
+        const GLOW_DURATION_MS = 5000;
+        // Camera starts this fraction of the normal orbit distance away, then zooms out during the orbit phase.
+        const CLOSE_RADIUS_FACTOR = 0.3;
+
+        let renderer, scene, camera, mixer, clock, rangeAttackAction;
+        let sceneReadyPromise = null;
+
+        function loadCharizardScene() {
+            if (sceneReadyPromise) return sceneReadyPromise;
+            sceneReadyPromise = new Promise((resolve, reject) => {
+                const canvas = document.getElementById('charizardCanvas');
+                renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+                renderer.setSize(canvas.width, canvas.height, false);
+
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x000000);
+
+                camera = new THREE.PerspectiveCamera(45, canvas.width / canvas.height, 0.1, 1000);
+
+                scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 1.2));
+                const keyLight = new THREE.DirectionalLight(0xffffff, 1.6);
+                keyLight.position.set(3, 5, 4);
+                scene.add(keyLight);
+                const rimLight = new THREE.DirectionalLight(0xff8844, 0.8);
+                rimLight.position.set(-4, 2, -3);
+                scene.add(rimLight);
+
+                const loader = new GLTFLoader();
+                loader.load(
+                    CHARIZARD_GLB_PATH,
+                    (gltf) => {
+                        const model = gltf.scene;
+                        const box = new THREE.Box3().setFromObject(model);
+                        const center = box.getCenter(new THREE.Vector3());
+                        const size = box.getSize(new THREE.Vector3());
+                        // Center the model at the origin so the camera can orbit around (0,0,0)
+                        model.position.sub(center);
+                        scene.add(model);
+
+                        const radius = Math.max(size.x, size.y, size.z) * 1.1 || 3;
+                        camera.userData.radius = radius;
+                        camera.userData.height = size.y * 0.12;
+
+                        mixer = new THREE.AnimationMixer(model);
+                        const clip = gltf.animations.find(a => a.name.includes('rangeattack01'))
+                            || gltf.animations.find(a => a.name.includes('attack01'))
+                            || gltf.animations[0];
+                        if (clip) {
+                            rangeAttackAction = mixer.clipAction(clip);
+                            rangeAttackAction.setLoop(THREE.LoopRepeat, Infinity);
+                        }
+                        clock = new THREE.Clock();
+                        resolve();
+                    },
+                    undefined,
+                    (err) => reject(err)
+                );
+            });
+            return sceneReadyPromise;
+        }
+
+        window.playCharizardCutscene = async function playCharizardCutscene(onComplete) {
+            const overlay = document.getElementById('charizardCutscene');
+            const glow = document.getElementById('charizardGlow');
+            const caption = document.getElementById('charizardCaption');
+            overlay.style.display = 'block';
+
+            try {
+                await loadCharizardScene();
+            } catch (err) {
+                console.error('Charizard cutscene failed to load:', err);
+                overlay.style.display = 'none';
+                onComplete();
+                return;
+            }
+
+            if (rangeAttackAction) rangeAttackAction.reset().play();
+            clock.getDelta(); // discard idle time accumulated since load
+
+            // Flash the glow in, then let it fade out on its own schedule (CSS-driven, decoupled from the render loop).
+            glow.style.transition = 'none';
+            glow.style.opacity = '1';
+            void glow.offsetWidth; // force reflow so opacity:1 registers before the transition starts
+            glow.style.transition = `opacity ${GLOW_DURATION_MS}ms ease-out`;
+            glow.style.opacity = '0';
+
+            // Caption starts hidden; it fades in once the caption phase begins.
+            caption.style.transition = 'none';
+            caption.style.opacity = '0';
+            void caption.offsetWidth;
+            caption.style.transition = 'opacity 500ms ease-in';
+
+            const radius = camera.userData.radius;
+            const closeRadius = radius * CLOSE_RADIUS_FACTOR;
+            const height = camera.userData.height;
+            const skyLookY = radius * 3; // a point high above the model, simulating "facing the sky"
+            const white = new THREE.Color(0xffffff);
+            const black = new THREE.Color(0x000000);
+            const startTime = performance.now();
+
+            function animate(now) {
+                const elapsed = now - startTime;
+                const t = Math.min(elapsed / CUTSCENE_DURATION_MS, 1);
+
+                if (elapsed <= REVEAL_DURATION_MS) {
+                    // Reveal phase: background fades white -> black, camera holds close and pans down from sky to Charizard.
+                    const revealT = elapsed / REVEAL_DURATION_MS;
+                    scene.background.copy(white).lerp(black, revealT);
+                    camera.position.set(0, height, closeRadius);
+                    camera.lookAt(0, skyLookY + (0 - skyLookY) * revealT, 0);
+                } else if (elapsed <= REVEAL_DURATION_MS + ORBIT_DURATION_MS) {
+                    // Orbit phase: rotate 180 degrees around the model while zooming back out to the normal distance.
+                    scene.background.copy(black);
+                    const orbitT = (elapsed - REVEAL_DURATION_MS) / ORBIT_DURATION_MS;
+                    const angle = orbitT * Math.PI;
+                    const currentRadius = closeRadius + (radius - closeRadius) * orbitT;
+                    camera.position.set(Math.sin(angle) * currentRadius, height, Math.cos(angle) * currentRadius);
+                    camera.lookAt(0, 0, 0);
+                } else {
+                    // Caption phase: hold the final framing and show the congratulations text.
+                    scene.background.copy(black);
+                    camera.position.set(0, height, -radius);
+                    camera.lookAt(0, 0, 0);
+                    if (caption.style.opacity !== '1') caption.style.opacity = '1';
+                }
+
+                if (mixer) mixer.update(clock.getDelta());
+                renderer.render(scene, camera);
+
+                if (t < 1) {
+                    requestAnimationFrame(animate);
+                } else {
+                    if (rangeAttackAction) rangeAttackAction.stop();
+                    caption.style.transition = 'none';
+                    caption.style.opacity = '0';
+                    overlay.style.display = 'none';
+                    onComplete();
+                }
+            }
+            requestAnimationFrame(animate);
+        };
     </script>
 </body>
 </html>
