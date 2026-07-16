@@ -274,11 +274,16 @@
 <body>
     <div id="gameContainer">
         <canvas id="gameCanvas" width="1000" height="600"></canvas>
-        <div id="score" class="info">Score: <span id="scoreValue">0</span></div>
+        <div id="score" class="info">Money: <span id="scoreValue">0</span></div>
         <button id="statsBtn" onclick="showStatsMenu()">Stats <span id="statsBadge">0</span></button>
-        <div id="controls" class="info">A/D: Move | W: Jump | Space: Shoot | ESC: Menu</div>        <div id="version" class="info">v1.0</div>        <div id="statsMenu">
+        <div id="controls" class="info">A/D: Move | Space: Jump | Left Click: Shoot | ESC: Menu</div>        <div id="version" class="info">v1.0</div>        <div id="statsMenu">
             <h2>&#9650; Stats &amp; Upgrades</h2>
             <div class="pts">Upgrade Points: <span id="upgradePointsDisplay">0</span></div>
+            <div class="stat-row">
+                <span class="stat-label">&#128176; Shop</span>
+                <span class="stat-val" id="shopAutoRepairStatus">Off</span>
+                <button class="upg-btn" id="buyAutoRepairBtn" onclick="buyAutoRepair()">Buy (100)</button>
+            </div>
             <div class="stat-row">
                 <span class="stat-label">&#128293; Fireball Damage</span>
                 <span class="stat-val" id="statDamage">1</span>
@@ -342,11 +347,15 @@
         // Game State
         const gameState = {
             score: 0,
+            money: 0,
             gameRunning: true,
             paused: false,
             statsOpen: false,
             cutsceneActive: false,
             keys: {},
+            shop: { autoRepair: false },
+            mouseWorldX: 0,
+            mouseWorldY: 0,
             fireballs: [],
             enemyFireballs: [],
             explosions: [],
@@ -387,15 +396,24 @@
                 this.jumpPower = -15;
                 this.direction = Direction.IDLE;
                 
-                // Load character images
-                this.imageLeft = new Image();
-                this.imageLeft.src = 'charmander_left.png';
-                
-                this.imageRight = new Image();
-                this.imageRight.src = 'charmander_right.png';
-                
-                // Default image
-                this.currentImage = this.imageRight;
+                // Load the sprite asset once and switch it at level 11.
+                this.characterImage = new Image();
+                this.currentSpriteAsset = null;
+                this.loadSpriteAsset();
+            }
+            getSpriteAsset() {
+                return gameState.level >= 11 ? 'charizard.png' : 'charmander_left.png';
+            }
+            getSpriteScale() {
+                return gameState.level >= 11 ? 2 : 1;
+            }
+            loadSpriteAsset() {
+                const asset = this.getSpriteAsset();
+                if (this.currentSpriteAsset !== asset) {
+                    this.characterImage = new Image();
+                    this.characterImage.src = asset;
+                    this.currentSpriteAsset = asset;
+                }
             }
             handleInput(keys) {
                 this.velocityX = 0;
@@ -403,14 +421,12 @@
                 if (keys['a'] || keys['A']) {
                     this.velocityX = -effectiveSpeed;
                     this.direction = Direction.LEFT;
-                    this.currentImage = this.imageLeft;
                 }
                 if (keys['d'] || keys['D']) {
                     this.velocityX = effectiveSpeed;
                     this.direction = Direction.RIGHT;
-                    this.currentImage = this.imageRight;
                 }
-                if ((keys['w'] || keys['W']) && !this.isJumping) {
+                if ((keys[' '] || keys['Space']) && !this.isJumping) {
                     this.isJumping = true;
                     this.velocityY = this.jumpPower;
                 }
@@ -438,9 +454,25 @@
                 if (this.x + this.width > WORLD_WIDTH) this.x = WORLD_WIDTH - this.width;
             }
             draw(ctx) {
-                // Draw character image
-                if (this.currentImage.complete) {
-                    ctx.drawImage(this.currentImage, this.x, this.y, this.width, this.height);
+                this.loadSpriteAsset();
+
+                if (this.characterImage.complete) {
+                    const scale = this.getSpriteScale();
+                    const aspectRatio = this.characterImage.naturalWidth / Math.max(this.characterImage.naturalHeight, 1);
+                    const drawHeight = this.height * scale;
+                    const drawWidth = drawHeight * aspectRatio;
+                    const drawX = this.x + (this.width - drawWidth) / 2;
+                    const drawY = this.y + (this.height - drawHeight) / 2;
+
+                    ctx.save();
+                    if (this.direction === Direction.RIGHT) {
+                        ctx.translate(drawX + drawWidth, drawY);
+                        ctx.scale(-1, 1);
+                        ctx.drawImage(this.characterImage, 0, 0, drawWidth, drawHeight);
+                    } else {
+                        ctx.drawImage(this.characterImage, drawX, drawY, drawWidth, drawHeight);
+                    }
+                    ctx.restore();
                 } else {
                     // Fallback while image is loading
                     ctx.fillStyle = COLORS.RED;
@@ -612,17 +644,22 @@
         }
         // Player Fireball class
         class Fireball {
-            constructor(x, y, dir) {
+            constructor(x, y, targetX, targetY) {
                 this.x = x;
                 this.y = y;
                 this.radius = 10;
-                this.vx = dir * 12;
-                this.vy = 0;
+                const dx = targetX - x;
+                const dy = targetY - y;
+                const mag = Math.sqrt(dx * dx + dy * dy) || 1;
+                const speed = 14;
+                this.vx = (dx / mag) * speed;
+                this.vy = (dy / mag) * speed;
                 this.active = true;
             }
             update() {
                 this.x += this.vx;
-                if (this.x < 0 || this.x > WORLD_WIDTH) {
+                this.y += this.vy;
+                if (this.x < -50 || this.x > WORLD_WIDTH + 50 || this.y < -50 || this.y > SCREEN_HEIGHT + 50) {
                     this.active = false;
                 }
             }
@@ -643,6 +680,43 @@
                     width: this.radius * 2,
                     height: this.radius * 2
                 };
+            }
+        }
+        class Repairman {
+            constructor(house) {
+                this.house = house;
+                this.active = false;
+                this.cooldown = 0;
+            }
+            update() {
+                if (!this.active || !this.house) return;
+                if (this.cooldown > 0) {
+                    this.cooldown--;
+                    return;
+                }
+                if (this.house.health < this.house.maxHealth) {
+                    this.house.repair(6);
+                }
+                this.cooldown = 90;
+            }
+            draw(ctx) {
+                if (!this.active || !this.house) return;
+                const x = this.house.x + this.house.width / 2 - 16;
+                const y = this.house.y + this.house.height + 8;
+                ctx.save();
+                ctx.fillStyle = '#5a3a1f';
+                ctx.fillRect(x, y, 32, 24);
+                ctx.fillStyle = '#ffdf00';
+                ctx.fillRect(x + 8, y + 10, 12, 8);
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(x + 6, y + 2, 8, 8);
+                ctx.fillStyle = '#000';
+                ctx.fillRect(x + 8, y + 4, 2, 2);
+                ctx.fillRect(x + 12, y + 4, 2, 2);
+                ctx.fillRect(x + 10, y + 8, 4, 2);
+                ctx.fillStyle = '#333';
+                ctx.fillRect(x + 16, y + 8, 8, 8);
+                ctx.restore();
             }
         }
         // House class
@@ -1218,12 +1292,16 @@
                 this.cameraX = 0;
                 this.house = null;
                 this.player = new Player(500, SCREEN_HEIGHT - GROUND_HEIGHT - 60);
+                this.repairman = null;
                 this.enemies = [];
                 this.spawnQueue = [];
                 this.spawnEnemies();
             }
             spawnEnemies() {
                 this.house = new House();
+                this.repairman = new Repairman(this.house);
+                this.repairman.active = gameState.shop.autoRepair;
+                this.house.repairman = this.repairman;
                 const bonusHP = gameState.stats.houseHealth * 20;
                 this.house.maxHealth = 100 + bonusHP;
                 this.house.health = 100 + bonusHP;
@@ -1289,6 +1367,7 @@
                     }
                 }
                 this.player.update(gameState.keys);
+                if (this.repairman) this.repairman.update();
                 this.house.update();
                 this.cameraX = Math.max(0, Math.min(this.player.x - SCREEN_WIDTH / 2, WORLD_WIDTH - SCREEN_WIDTH));
                 for (let enemy of this.enemies) {
@@ -1369,7 +1448,8 @@
                         if (fireball.active && checkCollision(fireball.getCollisionBox(), gameState.miniSlimes[i].getCollisionBox())) {
                             fireball.active = false;
                             gameState.miniSlimes.splice(i, 1);
-                            gameState.score += 10;
+                            gameState.money += 10;
+                            gameState.score = gameState.money;
                             break;
                         }
                     }
@@ -1408,7 +1488,8 @@
                             if (enemy.health <= 0) {
                                 const pts = (enemy instanceof BossSlime) ? 500 : 50;
                                 this.enemies.splice(i, 1);
-                                gameState.score += pts;
+                                gameState.money += pts;
+                                gameState.score = gameState.money;
                             }
                         }
                     }
@@ -1434,7 +1515,8 @@
                     if (checkCollision(playerBox, enemyBox)) {
                         this.player.x = WORLD_WIDTH / 2;
                         this.player.y = SCREEN_HEIGHT - GROUND_HEIGHT - 60;
-                        gameState.score = Math.max(0, gameState.score - 10);
+                        gameState.money = Math.max(0, gameState.money - 10);
+                        gameState.score = gameState.money;
                     }
                 }
                 // Level clear check — all queued spawns must have appeared and been defeated
@@ -1446,6 +1528,10 @@
                     }
                     if (gameState.level % 5 === 0) {
                         gameState.upgradePoints += gameState.level / 5;
+                        updateStatsBadge();
+                    }
+                    if (gameState.level === 11) {
+                        gameState.upgradePoints += 10;
                         updateStatsBadge();
                     }
                     gameState.showLevelBanner = true;
@@ -1489,6 +1575,7 @@
                 }
                 // Draw house
                 this.house.draw(this.ctx);
+                if (this.repairman) this.repairman.draw(this.ctx);
                 // Draw player
                 this.player.draw(this.ctx);
                 // Draw enemies
@@ -1514,8 +1601,9 @@
 
                 this.ctx.restore(); // Remove camera transform — UI drawn in screen space below
 
-                // Update score display
-                document.getElementById('scoreValue').textContent = gameState.score;
+                // Update money display
+                document.getElementById('scoreValue').textContent = gameState.money;
+                document.getElementById('finalScore').textContent = gameState.money;
                 // Draw lives
                 this.ctx.save();
                 this.ctx.font = 'bold 28px Arial';
@@ -1571,10 +1659,11 @@
             gameState.paused = false;
             gameState.gameRunning = true;
         }
-        function resetGame() {
+        function startGameAtLevel(level) {
             document.getElementById('pauseMenu').style.display = 'none';
             gameState.score = 0;
-            gameState.level = 1;
+            gameState.money = 0;
+            gameState.level = level;
             gameState.lives = 3;
             gameState.maxLives = 3;
             gameState.fireballs = [];
@@ -1586,24 +1675,44 @@
             gameState.levelBannerTimer = 0;
             gameState.paused = false;
             gameState.statsOpen = false;
-            gameState.upgradePoints = 0;
+            gameState.upgradePoints = level === 11 ? 10 : 0;
             gameState.stats = { damage: 1, playerHealth: 0, houseHealth: 0, speed: 0 };
+            const previousShop = gameState.shop || { autoRepair: false };
+            gameState.shop = { autoRepair: level === 1 ? false : previousShop.autoRepair };
             gameState.gameRunning = true;
             const game = window.game.gameInstance;
             game.player = new Player(500, SCREEN_HEIGHT - GROUND_HEIGHT - 60);
-            game.spawnEnemies();
+            if (level === 11 && typeof window.playCharizardCutscene === 'function') {
+                gameState.gameRunning = false;
+                gameState.cutsceneActive = true;
+                window.playCharizardCutscene(() => {
+                    gameState.cutsceneActive = false;
+                    gameState.gameRunning = true;
+                    game.spawnEnemies();
+                });
+            } else {
+                game.spawnEnemies();
+            }
             document.getElementById('scoreValue').textContent = 0;
+            document.getElementById('finalScore').textContent = 0;
             updateStatsBadge();
+        }
+        function resetGame() {
+            startGameAtLevel(1);
+        }
+        function jumpToLevel11() {
+            startGameAtLevel(11);
         }
         function exportGameState() {
             const game = window.game.gameInstance;
             const state = {
-                score: gameState.score,
+                money: gameState.money,
                 level: gameState.level,
                 lives: gameState.lives,
                 maxLives: gameState.maxLives,
                 upgradePoints: gameState.upgradePoints,
                 stats: { ...gameState.stats },
+                shop: { autoRepair: gameState.shop.autoRepair },
                 player: {
                     x: game.player.x,
                     y: game.player.y,
@@ -1617,7 +1726,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `game_save_level${gameState.level}_score${gameState.score}.json`;
+            a.download = `game_save_level${gameState.level}_money${gameState.money}.json`;
             a.click();
             URL.revokeObjectURL(url);
         }
@@ -1628,11 +1737,12 @@
             reader.onload = (e) => {
                 try {
                     const state = JSON.parse(e.target.result);
-                    if (typeof state.score !== 'number' || typeof state.level !== 'number') {
+                    if (typeof state.money !== 'number' || typeof state.level !== 'number') {
                         alert('Invalid save file.');
                         return;
                     }
-                    gameState.score = state.score;
+                    gameState.money = state.money;
+                    gameState.score = state.money;
                     gameState.level = state.level;
                     gameState.lives = state.lives ?? 3;
                     gameState.maxLives = state.maxLives ?? 3;
@@ -1647,6 +1757,7 @@
                     gameState.enemyFireballs = [];
                     gameState.explosions = [];
                     gameState.miniSlimes = [];
+                    gameState.shop = { autoRepair: state.shop?.autoRepair ?? false };
                     gameState.bossRageFlash = 0;
                     gameState.showLevelBanner = true;
                     gameState.levelBannerTimer = 0;
@@ -1660,7 +1771,8 @@
                     if (state.player?.direction !== undefined) game.player.direction = state.player.direction;
                     game.spawnEnemies();
                     if (state.house?.health !== undefined) game.house.health = state.house.health;
-                    document.getElementById('scoreValue').textContent = gameState.score;
+                    document.getElementById('scoreValue').textContent = gameState.money;
+                    document.getElementById('finalScore').textContent = gameState.money;
                     document.getElementById('pauseMenu').style.display = 'none';
                     updateStatsBadge();
                 } catch (err) {
@@ -1683,12 +1795,23 @@
         }
         function updateStatsDisplay() {
             document.getElementById('upgradePointsDisplay').textContent = gameState.upgradePoints;
+            const autoRepairBtn = document.getElementById('buyAutoRepairBtn');
+            const autoRepairStatus = document.getElementById('shopAutoRepairStatus');
+            if (gameState.shop.autoRepair) {
+                autoRepairBtn.textContent = 'Owned';
+                autoRepairBtn.disabled = true;
+                autoRepairStatus.textContent = 'On';
+            } else {
+                autoRepairBtn.textContent = `Buy (100)`;
+                autoRepairBtn.disabled = gameState.money < 100;
+                autoRepairStatus.textContent = 'Off';
+            }
             document.getElementById('statDamage').textContent = gameState.stats.damage;
             document.getElementById('statLives').textContent = gameState.maxLives;
             document.getElementById('statHouseHP').textContent = 100 + gameState.stats.houseHealth * 20;
             document.getElementById('statSpeed').textContent = 8 + gameState.stats.speed;
             const canUpgrade = gameState.upgradePoints > 0;
-            document.querySelectorAll('#statsMenu .upg-btn').forEach(btn => { btn.disabled = !canUpgrade; });
+            document.querySelectorAll('#statsMenu .upg-btn:not(#buyAutoRepairBtn)').forEach(btn => { btn.disabled = !canUpgrade; });
             updateStatsBadge();
         }
         function showStatsMenu() {
@@ -1701,6 +1824,18 @@
             document.getElementById('statsMenu').style.display = 'none';
             gameState.statsOpen = false;
             if (!gameState.paused) gameState.gameRunning = true;
+        }
+        function buyAutoRepair() {
+            if (gameState.shop.autoRepair || gameState.money < 100) return;
+            gameState.money -= 100;
+            gameState.score = gameState.money;
+            gameState.shop.autoRepair = true;
+            const game = window.game.gameInstance;
+            if (game && game.repairman) {
+                game.repairman.active = true;
+            }
+            updateStatsDisplay();
+            document.getElementById('scoreValue').textContent = gameState.money;
         }
         function upgradeStat(stat) {
             if (gameState.upgradePoints <= 0) return;
@@ -1734,7 +1869,13 @@
             // Move event listeners here so 'game' is defined
             document.addEventListener('keydown', (e) => {
                 if (gameState.cutsceneActive) return;
-                gameState.keys[e.key] = true;
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    gameState.keys[' '] = true;
+                    gameState.keys['Space'] = true;
+                } else {
+                    gameState.keys[e.key] = true;
+                }
                 if (e.key === 'Escape') {
                     if (gameState.paused) {
                         resumeGame();
@@ -1753,20 +1894,34 @@
                         gameState.gameRunning = true;
                     });
                 }
-                // Shoot fireball with SPACE
-                if ((e.key === ' ' || e.code === 'Space') && gameState.gameRunning && !gameState.showLevelBanner) {
-                    const player = game.player;
-                    const dir = player.direction === Direction.LEFT ? -1 : 1;
-                    const fireball = new Fireball(
-                        player.x + player.width/2 + dir*player.width/2,
-                        player.y + player.height/2,
-                        dir
-                    );
-                    gameState.fireballs.push(fireball);
+                if (e.key === 'b' || e.key === 'B') {
+                    jumpToLevel11();
                 }
             });
             document.addEventListener('keyup', (e) => {
-                gameState.keys[e.key] = false;
+                if (e.code === 'Space') {
+                    gameState.keys[' '] = false;
+                    gameState.keys['Space'] = false;
+                } else {
+                    gameState.keys[e.key] = false;
+                }
+            });
+
+            game.canvas.addEventListener('mousemove', (e) => {
+                const rect = game.canvas.getBoundingClientRect();
+                const screenX = e.clientX - rect.left;
+                const screenY = e.clientY - rect.top;
+                gameState.mouseWorldX = screenX + game.cameraX;
+                gameState.mouseWorldY = screenY;
+            });
+
+            game.canvas.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                if (gameState.cutsceneActive || gameState.paused || !gameState.gameRunning || gameState.showLevelBanner) return;
+                const player = game.player;
+                const targetX = gameState.mouseWorldX || (player.direction === Direction.LEFT ? player.x - 200 : player.x + 200);
+                const targetY = gameState.mouseWorldY || (player.y + player.height / 2);
+                gameState.fireballs.push(new Fireball(player.x + player.width / 2, player.y + player.height / 2, targetX, targetY));
             });
         });
     </script>
@@ -1838,21 +1993,11 @@
                         resolve();
                     },
                     undefined,
-                    (err) => {
-                        sceneReadyPromise = null; // allow a later call to retry instead of staying rejected forever
-                        reject(err);
-                    }
+                    (err) => reject(err)
                 );
             });
             return sceneReadyPromise;
         }
-
-        // Start fetching/parsing the (~23MB) model as soon as the page loads, so it's already
-        // in memory well before level 11 — the multi-second download would otherwise stall
-        // the cutscene with a blank screen if only started when the cutscene is triggered.
-        loadCharizardScene().catch((err) => {
-            console.error('Charizard model preload failed (will retry on first cutscene trigger):', err);
-        });
 
         window.playCharizardCutscene = async function playCharizardCutscene(onComplete) {
             const overlay = document.getElementById('charizardCutscene');
