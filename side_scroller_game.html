@@ -164,6 +164,25 @@
             white-space: nowrap;
         }
         #statsBtn:hover { background: rgba(60, 50, 10, 0.95); }
+        #shopBtn {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-165px);
+            background: rgba(20, 40, 25, 0.88);
+            color: #2ecc71;
+            border: 2px solid #2ecc71;
+            padding: 6px 18px;
+            font-size: 15px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: Arial, sans-serif;
+            z-index: 10;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+        #shopBtn:hover { background: rgba(20, 60, 30, 0.95); }
         #statsBadge {
             display: none;
             background: #ff4422;
@@ -220,6 +239,46 @@
             font-size: 15px; font-weight: bold; transition: background 0.2s;
         }
         #statsMenu .close-btn:hover { background: #764ba2; }
+        #shopMenu {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(10, 10, 30, 0.97);
+            color: white;
+            padding: 36px 44px;
+            border-radius: 12px;
+            text-align: center;
+            display: none;
+            z-index: 210;
+            min-width: 380px;
+            border: 2px solid #2ecc71;
+            box-shadow: 0 0 40px rgba(46, 204, 113, 0.25);
+        }
+        #shopMenu h2 { font-size: 26px; margin-bottom: 6px; color: #2ecc71; }
+        #shopMenu .stat-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+            font-size: 15px;
+            gap: 10px;
+        }
+        #shopMenu .stat-label { text-align: left; flex: 1; }
+        #shopMenu .stat-val { width: 52px; text-align: center; color: #7ec8e3; font-weight: bold; font-size: 16px; }
+        #shopMenu .upg-btn {
+            background: #27ae60; color: white; border: none;
+            padding: 5px 14px; border-radius: 5px; cursor: pointer;
+            font-size: 13px; font-weight: bold; transition: background 0.2s; white-space: nowrap;
+        }
+        #shopMenu .upg-btn:hover:not(:disabled) { background: #1e8449; }
+        #shopMenu .upg-btn:disabled { background: #444; color: #888; cursor: default; }
+        #shopMenu .close-btn {
+            margin-top: 22px; background: #667eea; color: white; border: none;
+            padding: 10px 34px; border-radius: 6px; cursor: pointer;
+            font-size: 15px; font-weight: bold; transition: background 0.2s;
+        }
+        #shopMenu .close-btn:hover { background: #764ba2; }
         #charizardCutscene {
             position: absolute;
             top: 0;
@@ -276,14 +335,24 @@
         <canvas id="gameCanvas" width="1000" height="600"></canvas>
         <div id="score" class="info">Money: <span id="scoreValue">0</span></div>
         <button id="statsBtn" onclick="showStatsMenu()">Stats <span id="statsBadge">0</span></button>
-        <div id="controls" class="info">A/D: Move | Space: Jump | Left Click: Shoot | ESC: Menu</div>        <div id="version" class="info">v1.0</div>        <div id="statsMenu">
-            <h2>&#9650; Stats &amp; Upgrades</h2>
-            <div class="pts">Upgrade Points: <span id="upgradePointsDisplay">0</span></div>
+        <button id="shopBtn" onclick="showShopMenu()">Shop</button>
+        <div id="controls" class="info">A/D: Move | Space: Jump | Left Click: Shoot | ESC: Menu</div>        <div id="version" class="info">v1.0</div>        <div id="shopMenu">
+            <h2>&#128736; Shop</h2>
             <div class="stat-row">
-                <span class="stat-label">&#128176; Shop</span>
+                <span class="stat-label">&#128736; Repairman</span>
                 <span class="stat-val" id="shopAutoRepairStatus">Off</span>
                 <button class="upg-btn" id="buyAutoRepairBtn" onclick="buyAutoRepair()">Buy (100)</button>
             </div>
+            <div class="stat-row">
+                <span class="stat-label">&#128680; Red Drone</span>
+                <span class="stat-val" id="shopDroneStatus">Off</span>
+                <button class="upg-btn" id="buyDroneBtn" onclick="buyDrone()">Buy (200)</button>
+            </div>
+            <button class="close-btn" onclick="closeShopMenu()">Close</button>
+        </div>
+        <div id="statsMenu">
+            <h2>&#9650; Stats &amp; Upgrades</h2>
+            <div class="pts">Upgrade Points: <span id="upgradePointsDisplay">0</span></div>
             <div class="stat-row">
                 <span class="stat-label">&#128293; Fireball Damage</span>
                 <span class="stat-val" id="statDamage">1</span>
@@ -351,15 +420,17 @@
             gameRunning: true,
             paused: false,
             statsOpen: false,
+            shopOpen: false,
             cutsceneActive: false,
             keys: {},
-            shop: { autoRepair: false },
+            shop: { autoRepair: false, autoRepairLevel: 0, autoRepairCost: 100, drone: false, droneLevel: 0, droneCost: 200 },
             mouseWorldX: 0,
             mouseWorldY: 0,
             fireballs: [],
             enemyFireballs: [],
             explosions: [],
             miniSlimes: [],
+            bombs: [],
             level: 1,
             levelBannerTimer: 0,
             showLevelBanner: true,
@@ -686,36 +757,278 @@
             constructor(house) {
                 this.house = house;
                 this.active = false;
+                this.level = 0;
+                this.cooldown = 0;
+                this.healEffectLife = 0;
+                this.swingFrame = 0;
+                this.repairAmount = 0;
+            }
+            setLevel(level) {
+                this.level = Math.max(0, level);
+                this.active = this.level > 0;
+                this.repairAmount = this.level > 0 ? 6 + (this.level - 1) * 2 : 0;
                 this.cooldown = 0;
             }
             update() {
                 if (!this.active || !this.house) return;
+
+                if (this.healEffectLife > 0) this.healEffectLife--;
+                if (this.swingFrame > 0) this.swingFrame--;
+
                 if (this.cooldown > 0) {
                     this.cooldown--;
                     return;
                 }
                 if (this.house.health < this.house.maxHealth) {
-                    this.house.repair(6);
+                    this.house.repair(this.repairAmount);
+                    this.healEffectLife = 16;
+                    this.swingFrame = 8;
                 }
-                this.cooldown = 90;
+                this.cooldown = Math.max(45, 90 - Math.max(0, this.level - 1) * 8);
+            }
+            drawRepairEffect(ctx, x, y) {
+                if (this.healEffectLife <= 0) return;
+                const intensity = this.healEffectLife / 16;
+                const ringRadius = 12 + intensity * 16;
+
+                ctx.save();
+                ctx.strokeStyle = `rgba(255, 230, 120, ${0.5 * intensity})`;
+                ctx.lineWidth = 2 + intensity * 2;
+                ctx.beginPath();
+                ctx.arc(x, y, ringRadius, 0, Math.PI * 2);
+                ctx.stroke();
+
+                for (let i = 0; i < 6; i++) {
+                    const angle = (i / 6) * Math.PI * 2 + (1 - intensity) * 0.8;
+                    const radius = 10 + intensity * 16 + i * 1.4;
+                    const px = x + Math.cos(angle) * radius;
+                    const py = y + Math.sin(angle) * radius;
+                    ctx.fillStyle = i % 2 === 0 ? '#ffe066' : '#9fe8ff';
+                    ctx.beginPath();
+                    ctx.arc(px, py, 2 + intensity * 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
             }
             draw(ctx) {
                 if (!this.active || !this.house) return;
-                const x = this.house.x + this.house.width / 2 - 16;
-                const y = this.house.y + this.house.height + 8;
+                const baseX = this.house.x + this.house.width + 24;
+                const feetY = this.house.y + this.house.height;
+                const swing = this.swingFrame > 0 ? Math.sin((this.swingFrame / 8) * Math.PI) * 0.35 : 0;
+
+                const hipY = feetY - 26;
+                const shoulderY = hipY - 24;
+                const neckH = 6;
+                const headR = 13;
+                const headCY = shoulderY - neckH - headR;
+
                 ctx.save();
-                ctx.fillStyle = '#5a3a1f';
-                ctx.fillRect(x, y, 32, 24);
-                ctx.fillStyle = '#ffdf00';
-                ctx.fillRect(x + 8, y + 10, 12, 8);
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(x + 6, y + 2, 8, 8);
+
+                // ground shadow, resting right on the grass under the feet
+                ctx.fillStyle = 'rgba(0,0,0,0.25)';
+                ctx.beginPath();
+                ctx.ellipse(baseX - 1, feetY + 1, 16, 5, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // boots, soles flush with the grass line
+                ctx.fillStyle = '#2b2b2b';
+                ctx.fillRect(baseX - 9, feetY - 8, 8, 8);
+                ctx.fillRect(baseX + 1, feetY - 8, 8, 8);
+
+                // denim overalls legs
+                ctx.strokeStyle = '#3b5c8a';
+                ctx.lineWidth = 7;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(baseX - 4, hipY);
+                ctx.lineTo(baseX - 6, feetY - 4);
+                ctx.moveTo(baseX + 4, hipY);
+                ctx.lineTo(baseX + 6, feetY - 4);
+                ctx.stroke();
+
+                // plaid shirt torso
+                ctx.fillStyle = '#a3462e';
+                ctx.fillRect(baseX - 10, shoulderY, 20, hipY - shoulderY);
+
+                // overalls bib + straps
+                ctx.fillStyle = '#3b5c8a';
+                ctx.beginPath();
+                ctx.moveTo(baseX - 8, hipY);
+                ctx.lineTo(baseX - 8, shoulderY + 6);
+                ctx.lineTo(baseX + 8, shoulderY + 6);
+                ctx.lineTo(baseX + 8, hipY);
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = '#2c4568';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(baseX - 6, shoulderY + 6);
+                ctx.lineTo(baseX - 6, shoulderY - 2);
+                ctx.moveTo(baseX + 6, shoulderY + 6);
+                ctx.lineTo(baseX + 6, shoulderY - 2);
+                ctx.stroke();
+
+                // tool belt with buckle
+                ctx.fillStyle = '#5d4037';
+                ctx.fillRect(baseX - 10, hipY - 3, 20, 5);
+                ctx.fillStyle = '#e8b923';
+                ctx.fillRect(baseX - 3, hipY - 3, 6, 5);
+
+                // arms (rolled sleeves + skin forearm), right arm swings the hammer
+                ctx.strokeStyle = '#a3462e';
+                ctx.lineWidth = 6;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(baseX - 9, shoulderY + 3);
+                ctx.lineTo(baseX - 12, shoulderY + 9);
+                ctx.moveTo(baseX + 9, shoulderY + 3);
+                ctx.lineTo(baseX + 12, shoulderY + 7);
+                ctx.stroke();
+                ctx.strokeStyle = '#f2c28b';
+                ctx.lineWidth = 5;
+                ctx.beginPath();
+                ctx.moveTo(baseX - 11, shoulderY + 8);
+                ctx.lineTo(baseX - 15, shoulderY + 15 + swing * 6);
+                ctx.moveTo(baseX + 11, shoulderY + 6);
+                ctx.lineTo(baseX + 16 + swing * 8, shoulderY + 8);
+                ctx.stroke();
+
+                // neck, joining the head to the shoulders
+                ctx.fillStyle = '#e0a877';
+                ctx.fillRect(baseX - 4, shoulderY - neckH, 8, neckH + 1);
+
+                // head + face
+                ctx.fillStyle = '#f2c28b';
+                ctx.beginPath();
+                ctx.arc(baseX, headCY, headR, 0, Math.PI * 2);
+                ctx.fill();
                 ctx.fillStyle = '#000';
-                ctx.fillRect(x + 8, y + 4, 2, 2);
-                ctx.fillRect(x + 12, y + 4, 2, 2);
-                ctx.fillRect(x + 10, y + 8, 4, 2);
-                ctx.fillStyle = '#333';
-                ctx.fillRect(x + 16, y + 8, 8, 8);
+                ctx.fillRect(baseX - 5, headCY - 1, 3, 3);
+                ctx.fillRect(baseX + 2, headCY - 1, 3, 3);
+                ctx.strokeStyle = '#5d4037';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(baseX - 4, headCY + 5);
+                ctx.lineTo(baseX + 4, headCY + 5);
+                ctx.stroke();
+
+                // hard hat
+                ctx.fillStyle = '#f1c40f';
+                ctx.beginPath();
+                ctx.arc(baseX, headCY - 3, headR, Math.PI, 0);
+                ctx.fill();
+                ctx.fillRect(baseX - headR - 3, headCY - 4, (headR + 3) * 2, 3);
+
+                // hammer, swung from the right hand
+                const handX = baseX + 16 + swing * 8;
+                const handY = shoulderY + 8;
+                ctx.strokeStyle = '#4a3b2a';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(handX, handY);
+                ctx.lineTo(handX + 12, handY - 4 - swing * 4);
+                ctx.stroke();
+                ctx.save();
+                ctx.translate(handX + 10, handY - 6 - swing * 4);
+                ctx.rotate(-swing);
+                ctx.fillStyle = '#7f8c8d';
+                ctx.fillRect(-3, -5, 14, 8);
+                ctx.fillStyle = '#bdc3c7';
+                ctx.fillRect(-3, -5, 14, 2);
+                ctx.restore();
+
+                this.drawRepairEffect(ctx, baseX + 8, shoulderY);
+                ctx.restore();
+            }
+        }
+        // Bomb dropped by the Drone — falls until it hits the ground, then splash-damages nearby enemies
+        class Bomb {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.vy = 1;
+                this.radius = 6;
+                this.blastRadius = 55;
+                this.groundY = SCREEN_HEIGHT - GROUND_HEIGHT;
+                this.active = true;
+            }
+            update() {
+                this.vy += 0.2;
+                this.y += this.vy;
+                if (this.y >= this.groundY) {
+                    this.y = this.groundY;
+                    this.active = false;
+                }
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.fillStyle = '#2b2b2b';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#7f8c8d';
+                ctx.fillRect(this.x - 1.5, this.y - this.radius - 4, 3, 4);
+                ctx.restore();
+            }
+            getCollisionBox() {
+                return { x: this.x - this.radius, y: this.y - this.radius, width: this.radius * 2, height: this.radius * 2 };
+            }
+        }
+        // Red Drone — flies above the battlefield and drops bombs on the nearest enemy
+        class Drone {
+            constructor(index = 0) {
+                this.x = 150 + (index * 220) % (WORLD_WIDTH - 300);
+                this.y = 60 + (index % 3) * 25;
+                this.level = 0;
+                this.active = false;
+                this.cooldown = 0;
+            }
+            setLevel(level) {
+                this.level = Math.max(0, level);
+                this.active = this.level > 0;
+                this.cooldown = 0;
+            }
+            update(target) {
+                if (!this.active) return;
+                if (this.cooldown > 0) this.cooldown--;
+                if (!target) return;
+
+                const targetX = target.x + target.width / 2;
+                const dx = targetX - this.x;
+                this.x += Math.sign(dx) * Math.min(3, Math.abs(dx));
+
+                if (this.cooldown <= 0 && Math.abs(targetX - this.x) < 30) {
+                    gameState.bombs.push(new Bomb(this.x, this.y + 12));
+                    this.cooldown = Math.max(50, 150 - (this.level - 1) * 20);
+                }
+            }
+            draw(ctx) {
+                if (!this.active) return;
+                ctx.save();
+                // rotor blur
+                ctx.fillStyle = 'rgba(40,40,40,0.5)';
+                ctx.beginPath(); ctx.ellipse(this.x - 15, this.y - 7, 9, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.ellipse(this.x + 15, this.y - 7, 9, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(this.x - 22, this.y - 7); ctx.lineTo(this.x - 8, this.y - 7);
+                ctx.moveTo(this.x + 8, this.y - 7); ctx.lineTo(this.x + 22, this.y - 7);
+                ctx.stroke();
+                // body
+                ctx.fillStyle = '#c0392b';
+                ctx.beginPath();
+                ctx.ellipse(this.x, this.y, 16, 8, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#7f1d1d';
+                ctx.beginPath();
+                ctx.ellipse(this.x, this.y - 3, 7, 5, 0, 0, Math.PI * 2);
+                ctx.fill();
+                // camera/sensor
+                ctx.fillStyle = '#111';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y + 6, 3, 0, Math.PI * 2);
+                ctx.fill();
                 ctx.restore();
             }
         }
@@ -1293,6 +1606,7 @@
                 this.house = null;
                 this.player = new Player(500, SCREEN_HEIGHT - GROUND_HEIGHT - 60);
                 this.repairman = null;
+                this.drones = [];
                 this.enemies = [];
                 this.spawnQueue = [];
                 this.spawnEnemies();
@@ -1300,8 +1614,15 @@
             spawnEnemies() {
                 this.house = new House();
                 this.repairman = new Repairman(this.house);
-                this.repairman.active = gameState.shop.autoRepair;
+                this.repairman.setLevel(gameState.shop.autoRepairLevel || 0);
                 this.house.repairman = this.repairman;
+                const droneCount = gameState.shop.droneLevel || 0;
+                this.drones = [];
+                for (let i = 0; i < droneCount; i++) {
+                    const drone = new Drone(i);
+                    drone.setLevel(1);
+                    this.drones.push(drone);
+                }
                 const bonusHP = gameState.stats.houseHealth * 20;
                 this.house.maxHealth = 100 + bonusHP;
                 this.house.health = 100 + bonusHP;
@@ -1331,6 +1652,7 @@
                 gameState.fireballs = [];
                 gameState.enemyFireballs = [];
                 gameState.miniSlimes = [];
+                gameState.bombs = [];
             }
             _spawnEnemy(entry) {
                 const y = SCREEN_HEIGHT - GROUND_HEIGHT - 50;
@@ -1368,6 +1690,21 @@
                 }
                 this.player.update(gameState.keys);
                 if (this.repairman) this.repairman.update();
+                // Spread drones across different enemies, but once every enemy already has a drone
+                // (e.g. only one is left), let the rest pile onto the nearest remaining target
+                const unclaimedEnemies = [...this.enemies];
+                for (const drone of this.drones) {
+                    const pool = unclaimedEnemies.length > 0 ? unclaimedEnemies : this.enemies;
+                    let bestIdx = -1, bestDist = Infinity;
+                    for (let i = 0; i < pool.length; i++) {
+                        const e = pool[i];
+                        const dist = Math.abs((e.x + e.width / 2) - drone.x);
+                        if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+                    }
+                    const target = bestIdx >= 0 ? pool[bestIdx] : null;
+                    if (target && pool === unclaimedEnemies) unclaimedEnemies.splice(bestIdx, 1);
+                    drone.update(target);
+                }
                 this.house.update();
                 this.cameraX = Math.max(0, Math.min(this.player.x - SCREEN_WIDTH / 2, WORLD_WIDTH - SCREEN_WIDTH));
                 for (let enemy of this.enemies) {
@@ -1406,6 +1743,41 @@
                 }
                 for (let efb of gameState.enemyFireballs) {
                     efb.update();
+                }
+                // Update bombs and resolve impacts — explode on ground contact or first enemy touch,
+                // splash-damaging every enemy within the blast radius by a flat 15
+                for (let bomb of gameState.bombs) bomb.update();
+                for (let i = gameState.bombs.length - 1; i >= 0; i--) {
+                    const bomb = gameState.bombs[i];
+                    let impactX = null, impactY = null;
+                    if (!bomb.active) {
+                        impactX = bomb.x; impactY = bomb.y;
+                    } else {
+                        for (const enemy of this.enemies) {
+                            if (checkCollision(bomb.getCollisionBox(), enemy.getCollisionBox())) {
+                                impactX = bomb.x; impactY = bomb.y;
+                                break;
+                            }
+                        }
+                    }
+                    if (impactX !== null) {
+                        gameState.explosions.push(new Explosion(impactX, impactY, { count: 30, duration: 55 }));
+                        for (let j = this.enemies.length - 1; j >= 0; j--) {
+                            const enemy = this.enemies[j];
+                            const ex = enemy.x + enemy.width / 2;
+                            const ey = enemy.y + enemy.height / 2;
+                            if (Math.hypot(ex - impactX, ey - impactY) <= bomb.blastRadius) {
+                                enemy.health = (enemy.health || enemy.maxHealth || 2) - 15;
+                                if (enemy.health <= 0) {
+                                    const pts = (enemy instanceof BossSlime) ? 500 : 50;
+                                    this.enemies.splice(j, 1);
+                                    gameState.money += pts;
+                                    gameState.score = gameState.money;
+                                }
+                            }
+                        }
+                        gameState.bombs.splice(i, 1);
+                    }
                 }
                 // Update explosions
                 for (let exp of gameState.explosions) exp.update();
@@ -1576,6 +1948,7 @@
                 // Draw house
                 this.house.draw(this.ctx);
                 if (this.repairman) this.repairman.draw(this.ctx);
+                for (const drone of this.drones) drone.draw(this.ctx);
                 // Draw player
                 this.player.draw(this.ctx);
                 // Draw enemies
@@ -1597,6 +1970,10 @@
                 // Draw mini-slimes
                 for (let ms of gameState.miniSlimes) {
                     ms.draw(this.ctx);
+                }
+                // Draw bombs
+                for (let bomb of gameState.bombs) {
+                    bomb.draw(this.ctx);
                 }
 
                 this.ctx.restore(); // Remove camera transform — UI drawn in screen space below
@@ -1677,8 +2054,12 @@
             gameState.statsOpen = false;
             gameState.upgradePoints = level === 11 ? 10 : 0;
             gameState.stats = { damage: 1, playerHealth: 0, houseHealth: 0, speed: 0 };
-            const previousShop = gameState.shop || { autoRepair: false };
-            gameState.shop = { autoRepair: level === 1 ? false : previousShop.autoRepair };
+            const previousShop = gameState.shop || { autoRepair: false, autoRepairLevel: 0, autoRepairCost: 100 };
+            gameState.shop = {
+                autoRepair: level === 1 ? false : Boolean(previousShop.autoRepair || (previousShop.autoRepairLevel || 0) > 0),
+                autoRepairLevel: level === 1 ? 0 : (previousShop.autoRepairLevel || 0),
+                autoRepairCost: level === 1 ? 100 : (previousShop.autoRepairCost ?? 100)
+            };
             gameState.gameRunning = true;
             const game = window.game.gameInstance;
             game.player = new Player(500, SCREEN_HEIGHT - GROUND_HEIGHT - 60);
@@ -1712,7 +2093,14 @@
                 maxLives: gameState.maxLives,
                 upgradePoints: gameState.upgradePoints,
                 stats: { ...gameState.stats },
-                shop: { autoRepair: gameState.shop.autoRepair },
+                shop: {
+                    autoRepair: gameState.shop.autoRepair,
+                    autoRepairLevel: gameState.shop.autoRepairLevel,
+                    autoRepairCost: gameState.shop.autoRepairCost,
+                    drone: gameState.shop.drone,
+                    droneLevel: gameState.shop.droneLevel,
+                    droneCost: gameState.shop.droneCost
+                },
                 player: {
                     x: game.player.x,
                     y: game.player.y,
@@ -1757,7 +2145,15 @@
                     gameState.enemyFireballs = [];
                     gameState.explosions = [];
                     gameState.miniSlimes = [];
-                    gameState.shop = { autoRepair: state.shop?.autoRepair ?? false };
+                    gameState.bombs = [];
+                    gameState.shop = {
+                        autoRepair: state.shop?.autoRepair ?? false,
+                        autoRepairLevel: state.shop?.autoRepairLevel ?? 0,
+                        autoRepairCost: state.shop?.autoRepairCost ?? 100,
+                        drone: state.shop?.drone ?? false,
+                        droneLevel: state.shop?.droneLevel ?? 0,
+                        droneCost: state.shop?.droneCost ?? 200
+                    };
                     gameState.bossRageFlash = 0;
                     gameState.showLevelBanner = true;
                     gameState.levelBannerTimer = 0;
@@ -1795,23 +2191,12 @@
         }
         function updateStatsDisplay() {
             document.getElementById('upgradePointsDisplay').textContent = gameState.upgradePoints;
-            const autoRepairBtn = document.getElementById('buyAutoRepairBtn');
-            const autoRepairStatus = document.getElementById('shopAutoRepairStatus');
-            if (gameState.shop.autoRepair) {
-                autoRepairBtn.textContent = 'Owned';
-                autoRepairBtn.disabled = true;
-                autoRepairStatus.textContent = 'On';
-            } else {
-                autoRepairBtn.textContent = `Buy (100)`;
-                autoRepairBtn.disabled = gameState.money < 100;
-                autoRepairStatus.textContent = 'Off';
-            }
             document.getElementById('statDamage').textContent = gameState.stats.damage;
             document.getElementById('statLives').textContent = gameState.maxLives;
             document.getElementById('statHouseHP').textContent = 100 + gameState.stats.houseHealth * 20;
             document.getElementById('statSpeed').textContent = 8 + gameState.stats.speed;
             const canUpgrade = gameState.upgradePoints > 0;
-            document.querySelectorAll('#statsMenu .upg-btn:not(#buyAutoRepairBtn)').forEach(btn => { btn.disabled = !canUpgrade; });
+            document.querySelectorAll('#statsMenu .upg-btn').forEach(btn => { btn.disabled = !canUpgrade; });
             updateStatsBadge();
         }
         function showStatsMenu() {
@@ -1825,16 +2210,77 @@
             gameState.statsOpen = false;
             if (!gameState.paused) gameState.gameRunning = true;
         }
+        function updateShopDisplay() {
+            const autoRepairBtn = document.getElementById('buyAutoRepairBtn');
+            const autoRepairStatus = document.getElementById('shopAutoRepairStatus');
+            const repairLevel = gameState.shop.autoRepairLevel || 0;
+            const repairCost = gameState.shop.autoRepairCost ?? 100;
+            if (repairLevel > 0) {
+                autoRepairBtn.textContent = `Upgrade (${repairCost})`;
+                autoRepairBtn.disabled = gameState.money < repairCost;
+                autoRepairStatus.textContent = `Lv ${repairLevel}`;
+            } else {
+                autoRepairBtn.textContent = `Buy (${repairCost})`;
+                autoRepairBtn.disabled = gameState.money < repairCost;
+                autoRepairStatus.textContent = 'Off';
+            }
+            const droneBtn = document.getElementById('buyDroneBtn');
+            const droneStatus = document.getElementById('shopDroneStatus');
+            const droneLevel = gameState.shop.droneLevel || 0;
+            const droneCost = gameState.shop.droneCost ?? 200;
+            if (droneLevel > 0) {
+                droneBtn.textContent = `Buy Another (${droneCost})`;
+                droneBtn.disabled = gameState.money < droneCost;
+                droneStatus.textContent = `x${droneLevel}`;
+            } else {
+                droneBtn.textContent = `Buy (${droneCost})`;
+                droneBtn.disabled = gameState.money < droneCost;
+                droneStatus.textContent = 'Off';
+            }
+        }
+        function showShopMenu() {
+            gameState.shopOpen = true;
+            if (!gameState.paused) gameState.gameRunning = false;
+            updateShopDisplay();
+            document.getElementById('shopMenu').style.display = 'block';
+        }
+        function closeShopMenu() {
+            document.getElementById('shopMenu').style.display = 'none';
+            gameState.shopOpen = false;
+            if (!gameState.paused) gameState.gameRunning = true;
+        }
         function buyAutoRepair() {
-            if (gameState.shop.autoRepair || gameState.money < 100) return;
-            gameState.money -= 100;
+            const cost = gameState.shop.autoRepairCost ?? 100;
+            if (gameState.money < cost) return;
+            gameState.money -= cost;
             gameState.score = gameState.money;
+            const nextLevel = (gameState.shop.autoRepairLevel || 0) + 1;
             gameState.shop.autoRepair = true;
+            gameState.shop.autoRepairLevel = nextLevel;
+            gameState.shop.autoRepairCost = cost * 2;
             const game = window.game.gameInstance;
             if (game && game.repairman) {
-                game.repairman.active = true;
+                game.repairman.setLevel(nextLevel);
             }
-            updateStatsDisplay();
+            updateShopDisplay();
+            document.getElementById('scoreValue').textContent = gameState.money;
+        }
+        function buyDrone() {
+            const cost = gameState.shop.droneCost ?? 200;
+            if (gameState.money < cost) return;
+            gameState.money -= cost;
+            gameState.score = gameState.money;
+            const nextLevel = (gameState.shop.droneLevel || 0) + 1;
+            gameState.shop.drone = true;
+            gameState.shop.droneLevel = nextLevel;
+            gameState.shop.droneCost = cost * 2;
+            const game = window.game.gameInstance;
+            if (game) {
+                const drone = new Drone(nextLevel - 1);
+                drone.setLevel(1);
+                game.drones.push(drone);
+            }
+            updateShopDisplay();
             document.getElementById('scoreValue').textContent = gameState.money;
         }
         function upgradeStat(stat) {
