@@ -443,7 +443,8 @@
                 playerHealth: 0, // bonus max lives
                 houseHealth: 0,  // bonus house max HP tiers (+20 each)
                 speed: 0         // bonus move speed
-            }
+            },
+            checkpoint: null // snapshot taken at the start of each post-boss level (1, 6, 11, ...); restored when all lives are lost
         };
         // Direction enum
         const Direction = {
@@ -1807,10 +1808,8 @@
                         gameState.miniSlimes.splice(i, 1);
                         gameState.lives--;
                         if (gameState.lives <= 0) {
-                            gameState.lives = gameState.maxLives;
-                            gameState.showLevelBanner = true;
-                            gameState.levelBannerTimer = 0;
-                            this.spawnEnemies();
+                            revertToCheckpoint();
+                            break; // gameState.miniSlimes was just replaced; stop indexing into the old array
                         }
                     }
                 }
@@ -1873,11 +1872,7 @@
                         efb.active = false;
                         gameState.lives--;
                         if (gameState.lives <= 0) {
-                            // Reset level and lives
-                            gameState.lives = gameState.maxLives;
-                            gameState.showLevelBanner = true;
-                            gameState.levelBannerTimer = 0;
-                            this.spawnEnemies();
+                            revertToCheckpoint();
                         }
                     }
                 }
@@ -1905,6 +1900,9 @@
                     if (gameState.level === 11) {
                         gameState.upgradePoints += 10;
                         updateStatsBadge();
+                    }
+                    if ((gameState.level - 1) % 5 === 0) {
+                        saveCheckpoint();
                     }
                     gameState.showLevelBanner = true;
                     gameState.levelBannerTimer = 0;
@@ -2077,12 +2075,51 @@
             document.getElementById('scoreValue').textContent = 0;
             document.getElementById('finalScore').textContent = 0;
             updateStatsBadge();
+            saveCheckpoint();
         }
         function resetGame() {
             startGameAtLevel(1);
         }
         function jumpToLevel11() {
             startGameAtLevel(11);
+        }
+        // Snapshots progress at the start of each post-boss level (1, 6, 11, ...) so a full wipe
+        // can revert there instead of ending the run.
+        function saveCheckpoint() {
+            gameState.checkpoint = {
+                level: gameState.level,
+                money: gameState.money,
+                lives: gameState.lives,
+                maxLives: gameState.maxLives,
+                upgradePoints: gameState.upgradePoints,
+                stats: { ...gameState.stats },
+                shop: { ...gameState.shop }
+            };
+        }
+        function revertToCheckpoint() {
+            const cp = gameState.checkpoint;
+            gameState.level = cp.level;
+            gameState.money = cp.money;
+            gameState.score = cp.money;
+            gameState.lives = cp.lives;
+            gameState.maxLives = cp.maxLives;
+            gameState.upgradePoints = cp.upgradePoints;
+            gameState.stats = { ...cp.stats };
+            gameState.shop = { ...cp.shop };
+            gameState.fireballs = [];
+            gameState.enemyFireballs = [];
+            gameState.explosions = [];
+            gameState.miniSlimes = [];
+            gameState.bombs = [];
+            gameState.bossRageFlash = 0;
+            gameState.showLevelBanner = true;
+            gameState.levelBannerTimer = 0;
+            const game = window.game.gameInstance;
+            game.player = new Player(500, SCREEN_HEIGHT - GROUND_HEIGHT - 60);
+            game.spawnEnemies();
+            document.getElementById('scoreValue').textContent = gameState.money;
+            document.getElementById('finalScore').textContent = gameState.money;
+            updateStatsBadge();
         }
         function exportGameState() {
             const game = window.game.gameInstance;
@@ -2171,6 +2208,7 @@
                     document.getElementById('finalScore').textContent = gameState.money;
                     document.getElementById('pauseMenu').style.display = 'none';
                     updateStatsBadge();
+                    saveCheckpoint();
                 } catch (err) {
                     alert('Failed to load save: ' + err.message);
                 }
@@ -2310,6 +2348,7 @@
             window.game = {};
             const game = new Game();
             window.game.gameInstance = game;
+            saveCheckpoint();
             game.run();
 
             // Move event listeners here so 'game' is defined
