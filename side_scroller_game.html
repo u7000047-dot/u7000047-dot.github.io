@@ -413,6 +413,32 @@
             LIGHT_BLUE: '#87ceeb',
             DARK_GREEN: '#006400'
         };
+        // Biome decorations — fixed (seeded) positions so they don't jitter between frames.
+        function seededPositions(seed, count, spread) {
+            let s = seed;
+            const rand = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+            const out = [];
+            for (let i = 0; i < count; i++) out.push(rand() * spread);
+            return out;
+        }
+        function getBiome(level) {
+            if (level >= 1 && level <= 5) return 'swamp';
+            if (level >= 6 && level <= 10) return 'polluted';
+            return 'default';
+        }
+        const SWAMP_PUDDLES = seededPositions(42, 12, WORLD_WIDTH).map((x, i) => ({
+            x,
+            rx: 30 + (i % 5) * 12,
+            ry: 9 + (i % 3) * 4
+        }));
+        const DEAD_TREES = seededPositions(7, 7, WORLD_WIDTH).map((x, i) => ({
+            x,
+            scale: 0.7 + (i % 4) * 0.15
+        }));
+        const POLLUTED_CLOUDS = seededPositions(13, 6, WORLD_WIDTH).map((x, i) => ({
+            x,
+            y: 30 + (i % 3) * 35
+        }));
         // Game State
         const gameState = {
             score: 0,
@@ -2078,9 +2104,49 @@
                     }
                 }
             }
+            drawPollutedCloud(x, y) {
+                const ctx = this.ctx;
+                ctx.save();
+                ctx.fillStyle = 'rgba(95, 90, 80, 0.55)';
+                ctx.beginPath();
+                ctx.ellipse(x, y, 55, 20, 0, 0, Math.PI * 2);
+                ctx.ellipse(x + 40, y + 6, 40, 16, 0, 0, Math.PI * 2);
+                ctx.ellipse(x - 35, y + 8, 35, 14, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+            drawDeadTree(x, groundY, scale) {
+                const ctx = this.ctx;
+                ctx.save();
+                ctx.translate(x, groundY);
+                ctx.scale(scale, scale);
+                ctx.strokeStyle = '#4a4038';
+                ctx.lineWidth = 5;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(0, -70);
+                ctx.moveTo(0, -70);
+                ctx.lineTo(-22, -100);
+                ctx.moveTo(0, -70);
+                ctx.lineTo(18, -95);
+                ctx.moveTo(-8, -45);
+                ctx.lineTo(-28, -60);
+                ctx.moveTo(6, -35);
+                ctx.lineTo(26, -50);
+                ctx.moveTo(-22, -100);
+                ctx.lineTo(-32, -112);
+                ctx.moveTo(-22, -100);
+                ctx.lineTo(-14, -118);
+                ctx.moveTo(18, -95);
+                ctx.lineTo(28, -110);
+                ctx.stroke();
+                ctx.restore();
+            }
             draw() {
+                const biome = getBiome(gameState.level);
                 // Clear screen
-                this.ctx.fillStyle = COLORS.LIGHT_BLUE;
+                this.ctx.fillStyle = biome === 'polluted' ? '#8a8a76' : (biome === 'swamp' ? '#7a8f7a' : COLORS.LIGHT_BLUE);
                 this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
                 // Apply camera offset for all world elements
@@ -2088,19 +2154,61 @@
                 this.ctx.translate(-this.cameraX, 0);
 
                 // Draw sky
-                this.ctx.fillStyle = COLORS.LIGHT_BLUE;
+                if (biome === 'polluted') {
+                    const skyGrad = this.ctx.createLinearGradient(0, 0, 0, SCREEN_HEIGHT - GROUND_HEIGHT);
+                    skyGrad.addColorStop(0, '#6f6f60');
+                    skyGrad.addColorStop(1, '#a3a38c');
+                    this.ctx.fillStyle = skyGrad;
+                } else if (biome === 'swamp') {
+                    this.ctx.fillStyle = '#7a8f7a';
+                } else {
+                    this.ctx.fillStyle = COLORS.LIGHT_BLUE;
+                }
                 this.ctx.fillRect(0, 0, WORLD_WIDTH, SCREEN_HEIGHT - GROUND_HEIGHT);
+                // Polluted haze clouds
+                if (biome === 'polluted') {
+                    for (const c of POLLUTED_CLOUDS) this.drawPollutedCloud(c.x, c.y);
+                }
                 // Draw ground
-                this.ctx.fillStyle = COLORS.GREEN;
+                this.ctx.fillStyle = biome === 'swamp' ? '#4e5c3a' : COLORS.GREEN;
                 this.ctx.fillRect(0, SCREEN_HEIGHT - GROUND_HEIGHT, WORLD_WIDTH, GROUND_HEIGHT);
-                // Draw grass pattern
-                this.ctx.strokeStyle = COLORS.DARK_GREEN;
-                this.ctx.lineWidth = 2;
-                for (let x = 0; x < WORLD_WIDTH; x += 50) {
-                    this.ctx.beginPath();
-                    this.ctx.moveTo(x, SCREEN_HEIGHT - GROUND_HEIGHT);
-                    this.ctx.lineTo(x + 25, SCREEN_HEIGHT - GROUND_HEIGHT + 10);
-                    this.ctx.stroke();
+                if (biome === 'swamp') {
+                    // Muddy ground texture
+                    this.ctx.strokeStyle = '#3a4527';
+                    this.ctx.lineWidth = 2;
+                    for (let x = 0; x < WORLD_WIDTH; x += 50) {
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(x, SCREEN_HEIGHT - GROUND_HEIGHT);
+                        this.ctx.lineTo(x + 25, SCREEN_HEIGHT - GROUND_HEIGHT + 10);
+                        this.ctx.stroke();
+                    }
+                    // Puddles
+                    const groundTop = SCREEN_HEIGHT - GROUND_HEIGHT;
+                    for (const p of SWAMP_PUDDLES) {
+                        this.ctx.save();
+                        this.ctx.fillStyle = 'rgba(70, 100, 115, 0.8)';
+                        this.ctx.beginPath();
+                        this.ctx.ellipse(p.x, groundTop + 22, p.rx, p.ry, 0, 0, Math.PI * 2);
+                        this.ctx.fill();
+                        this.ctx.strokeStyle = 'rgba(35, 55, 65, 0.7)';
+                        this.ctx.lineWidth = 2;
+                        this.ctx.stroke();
+                        this.ctx.restore();
+                    }
+                } else {
+                    // Draw grass pattern
+                    this.ctx.strokeStyle = COLORS.DARK_GREEN;
+                    this.ctx.lineWidth = 2;
+                    for (let x = 0; x < WORLD_WIDTH; x += 50) {
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(x, SCREEN_HEIGHT - GROUND_HEIGHT);
+                        this.ctx.lineTo(x + 25, SCREEN_HEIGHT - GROUND_HEIGHT + 10);
+                        this.ctx.stroke();
+                    }
+                    if (biome === 'polluted') {
+                        // Dead trees scattered in the background
+                        for (const t of DEAD_TREES) this.drawDeadTree(t.x, SCREEN_HEIGHT - GROUND_HEIGHT, t.scale);
+                    }
                 }
                 // Draw house
                 this.house.draw(this.ctx);
