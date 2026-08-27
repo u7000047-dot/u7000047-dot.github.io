@@ -422,8 +422,10 @@
             return out;
         }
         function getBiome(level) {
-            if (level >= 1 && level <= 5) return 'swamp';
-            if (level >= 6 && level <= 10) return 'polluted';
+            // Special maps only show up on boss levels; every other level uses the default map.
+            if (level === 15) return 'galaxy';
+            if (level === 10) return 'polluted';
+            if (level % 5 === 0) return 'swamp';
             return 'default';
         }
         const SWAMP_PUDDLES = seededPositions(42, 12, WORLD_WIDTH).map((x, i) => ({
@@ -438,6 +440,23 @@
         const POLLUTED_CLOUDS = seededPositions(13, 6, WORLD_WIDTH).map((x, i) => ({
             x,
             y: 30 + (i % 3) * 35
+        }));
+        // Galaxy backdrop for the Rayquaza fight — starfield + a couple of distant nebula/planet blobs
+        const GALAXY_STARS = seededPositions(77, 90, WORLD_WIDTH).map((x, i) => ({
+            x,
+            y: seededPositions(i * 13 + 5, 1, SCREEN_HEIGHT - GROUND_HEIGHT)[0],
+            r: 0.8 + (i % 4) * 0.6,
+            twinkle: i % 7
+        }));
+        const GALAXY_NEBULAE = seededPositions(23, 4, WORLD_WIDTH).map((x, i) => ({
+            x,
+            y: 60 + (i % 3) * 90,
+            scale: 0.8 + (i % 3) * 0.4,
+            hue: i % 2 === 0 ? '147,51,234' : '236,72,153'
+        }));
+        const GALAXY_CRATERS = seededPositions(31, 14, WORLD_WIDTH).map((x, i) => ({
+            x,
+            r: 10 + (i % 5) * 6
         }));
         // Game State
         const gameState = {
@@ -459,6 +478,9 @@
             bombs: [],
             weezingBombs: [],
             gasClouds: [],
+            meteors: [],
+            blackHoles: [],
+            slayCutscene: null, // drives the falling-katana finisher sequence when Rayquaza is defeated
             gasDebuffTimer: 0, // >0 while the player can't shoot / has tunnel vision from touching Weezing's gas
             level: 1,
             levelBannerTimer: 0,
@@ -1641,6 +1663,224 @@
                 return { x: this.x, y: this.y, width: this.width, height: this.height };
             }
         }
+        // Meteor — falling rock dropped in barrages by RayquazaBoss. Explodes on ground/player
+        // contact, leaves a short fire trail on the way down.
+        class Meteor {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 1.5;
+                this.vy = 4 + Math.random() * 2;
+                this.radius = 16;
+                this.active = true;
+                this.trail = [];
+            }
+            update() {
+                this.trail.push({ x: this.x, y: this.y });
+                if (this.trail.length > 8) this.trail.shift();
+                this.vy += 0.15;
+                this.x += this.vx;
+                this.y += this.vy;
+                const groundY = SCREEN_HEIGHT - GROUND_HEIGHT;
+                if (this.y >= groundY) {
+                    this.y = groundY;
+                    this.active = false;
+                }
+            }
+            getCollisionBox() {
+                return { x: this.x - this.radius, y: this.y - this.radius, width: this.radius * 2, height: this.radius * 2 };
+            }
+            draw(ctx) {
+                ctx.save();
+                for (let i = 0; i < this.trail.length; i++) {
+                    const t = this.trail[i];
+                    const alpha = (i / this.trail.length) * 0.5;
+                    ctx.fillStyle = `rgba(255,120,30,${alpha.toFixed(3)})`;
+                    ctx.beginPath();
+                    ctx.arc(t.x, t.y, this.radius * 0.6, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.fillStyle = '#5c3a21';
+                ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = 'rgba(255,150,40,0.85)';
+                ctx.beginPath(); ctx.arc(this.x, this.y, this.radius * 0.6, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = '#2e1c10'; ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+        // BlackHole — stationary hazard summoned by RayquazaBoss. Pulls the player toward its
+        // core while active; touching the core deals a hit and collapses it.
+        class BlackHole {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.life = 300; // 5s at 60fps
+                this.pullRadius = 220;
+                this.coreRadius = 22;
+                this.frame = 0;
+            }
+            get active() { return this.life > 0; }
+            update() {
+                this.life--;
+                this.frame++;
+            }
+            getCollisionBox() {
+                return { x: this.x - this.coreRadius, y: this.y - this.coreRadius, width: this.coreRadius * 2, height: this.coreRadius * 2 };
+            }
+            draw(ctx) {
+                const fade = Math.min(1, this.life / 45);
+                ctx.save();
+                ctx.globalAlpha = fade;
+                // Swirling accretion rings
+                for (let i = 0; i < 3; i++) {
+                    const r = this.pullRadius * (0.35 + i * 0.28);
+                    const rot = this.frame * (0.02 + i * 0.01) * (i % 2 === 0 ? 1 : -1);
+                    ctx.save();
+                    ctx.translate(this.x, this.y);
+                    ctx.rotate(rot);
+                    ctx.scale(1, 0.35);
+                    ctx.strokeStyle = `rgba(147,51,234,${0.5 - i * 0.12})`;
+                    ctx.lineWidth = 4;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, r, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+                // Core
+                const grd = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.coreRadius);
+                grd.addColorStop(0, '#000000');
+                grd.addColorStop(0.7, '#1a0a2e');
+                grd.addColorStop(1, 'rgba(147,51,234,0.6)');
+                ctx.fillStyle = grd;
+                ctx.beginPath(); ctx.arc(this.x, this.y, this.coreRadius, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+            }
+        }
+        // RayquazaBoss — level 15 flying boss. Patrols and periodically dashes across the sky,
+        // raining meteor barrages and summoning pulling black holes.
+        class RayquazaBoss {
+            constructor() {
+                this.width = 170;
+                this.height = 95;
+                this.x = WORLD_WIDTH / 2 - this.width / 2;
+                this.y = 120;
+                this.minY = 80;
+                this.maxY = 300;
+                this.maxSpeed = 5.5;
+                this.vx = this.maxSpeed;
+                this.vy = 0;
+                this.retargetCooldown = 40;
+                this.maxHealth = 800;
+                this.health = 800;
+                this.meteorCooldown = 180;
+                this.blackHoleCooldown = 420;
+                this.dashCooldown = 300;
+                this.dashing = false;
+                this.dashTimer = 0;
+                this.rageTriggered = false;
+                this.rageMode = false;
+                this.image = new Image();
+                this.image.src = 'Rayquaza.png';
+            }
+            update() {
+                if (this.health <= 0) return; // frozen once defeated — the slay cutscene takes over
+                if (this.dashing) {
+                    this.x += this.vx;
+                    this.dashTimer--;
+                    if (this.dashTimer <= 0 || this.x < -this.width - 40 || this.x > WORLD_WIDTH + 40) {
+                        this.dashing = false;
+                        this.x = Math.max(0, Math.min(this.x, WORLD_WIDTH - this.width));
+                        this.retargetCooldown = 20;
+                    }
+                } else {
+                    this.retargetCooldown--;
+                    if (this.retargetCooldown <= 0) {
+                        const angle = Math.random() * Math.PI * 2;
+                        this.vx = Math.cos(angle) * this.maxSpeed;
+                        this.vy = Math.sin(angle) * this.maxSpeed * 0.6;
+                        this.retargetCooldown = 30 + Math.floor(Math.random() * 50);
+                    }
+                    this.x += this.vx;
+                    this.y += this.vy;
+                    const minX = 0, maxX = WORLD_WIDTH - this.width;
+                    if (this.x < minX) { this.x = minX; this.vx = Math.abs(this.vx); }
+                    if (this.x > maxX) { this.x = maxX; this.vx = -Math.abs(this.vx); }
+                    if (this.y < this.minY) { this.y = this.minY; this.vy = Math.abs(this.vy); }
+                    if (this.y > this.maxY) { this.y = this.maxY; this.vy = -Math.abs(this.vy); }
+
+                    this.dashCooldown--;
+                    if (this.dashCooldown <= 0) {
+                        this.dashing = true;
+                        this.dashTimer = 40;
+                        this.vx = (this.x < WORLD_WIDTH / 2 ? 1 : -1) * this.maxSpeed * 3.2;
+                        this.dashCooldown = (this.rageMode ? 180 : 260) + Math.floor(Math.random() * 160);
+                    }
+                }
+                this.meteorCooldown--;
+                if (this.meteorCooldown <= 0) {
+                    this.spawnMeteorBarrage();
+                    this.meteorCooldown = (this.rageMode ? 160 : 260) + Math.floor(Math.random() * 120);
+                }
+                this.blackHoleCooldown--;
+                if (this.blackHoleCooldown <= 0) {
+                    gameState.blackHoles.push(new BlackHole(200 + Math.random() * (WORLD_WIDTH - 400), 220 + Math.random() * 110));
+                    this.blackHoleCooldown = (this.rageMode ? 340 : 480) + Math.floor(Math.random() * 240);
+                }
+                if (this.health <= this.maxHealth * 0.3 && !this.rageTriggered) {
+                    this.rageTriggered = true;
+                    this.rageMode = true;
+                    gameState.bossRageFlash = 90;
+                }
+            }
+            spawnMeteorBarrage() {
+                const count = 3 + Math.floor(Math.random() * 3);
+                for (let i = 0; i < count; i++) {
+                    const startX = Math.random() * WORLD_WIDTH;
+                    gameState.meteors.push(new Meteor(startX, -40 - Math.random() * 120));
+                }
+            }
+            draw(ctx) {
+                if (this.image.complete && this.image.naturalWidth > 0) {
+                    ctx.save();
+                    if (this.rageMode) {
+                        ctx.shadowColor = '#ff5500';
+                        ctx.shadowBlur = 24;
+                    }
+                    if (this.vx > 0) {
+                        ctx.translate(this.x + this.width, this.y);
+                        ctx.scale(-1, 1);
+                        ctx.drawImage(this.image, 0, 0, this.width, this.height);
+                    } else {
+                        ctx.drawImage(this.image, this.x, this.y, this.width, this.height);
+                    }
+                    ctx.restore();
+                } else {
+                    ctx.fillStyle = '#16a34a';
+                    ctx.fillRect(this.x, this.y, this.width, this.height);
+                }
+                // Health bar
+                const barW = this.width + 30;
+                const barX = this.x + this.width / 2 - barW / 2;
+                const barY = this.y - 22;
+                const hp = this.health / this.maxHealth;
+                ctx.save();
+                ctx.fillStyle = '#222'; ctx.fillRect(barX, barY, barW, 12);
+                ctx.fillStyle = hp > 0.4 ? '#00cc00' : hp > 0.2 ? '#ddcc00' : '#dd2200';
+                ctx.fillRect(barX, barY, barW * hp, 12);
+                ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5; ctx.strokeRect(barX, barY, barW, 12);
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+                ctx.fillText('BOSS HP: ' + this.health, barX + barW / 2, barY - 4);
+                if (this.rageMode) {
+                    ctx.fillStyle = '#ff4400'; ctx.font = 'bold 13px Arial';
+                    ctx.fillText('!! ENRAGED !!', barX + barW / 2, barY - 17);
+                }
+                ctx.restore();
+            }
+            getCollisionBox() {
+                return { x: this.x, y: this.y, width: this.width, height: this.height };
+            }
+        }
         // Explosion visual effect used when chaser hits the house
         class Explosion {
             constructor(x, y, opts = {}) {
@@ -1747,6 +1987,7 @@
                 this.canvas = document.getElementById('gameCanvas');
                 this.ctx = this.canvas.getContext('2d');
                 this.cameraX = 0;
+                this.frameCount = 0;
                 this.house = null;
                 this.player = new Player(500, SCREEN_HEIGHT - GROUND_HEIGHT - 60);
                 this.repairman = null;
@@ -1790,9 +2031,12 @@
                 }
 
                 // Boss slime walks in from off-screen left — spawn immediately.
-                // Level 10 gets the flying WeezingBoss instead; other boss levels keep the ground slime.
+                // Level 10 gets the flying WeezingBoss, level 15 gets RayquazaBoss; other boss
+                // levels keep the ground slime.
                 if (gameState.level === 10) {
                     this.enemies.push(new WeezingBoss());
+                } else if (gameState.level === 15) {
+                    this.enemies.push(new RayquazaBoss());
                 } else if (gameState.level % 5 === 0) {
                     this.enemies.push(new BossSlime());
                 }
@@ -1802,6 +2046,8 @@
                 gameState.bombs = [];
                 gameState.weezingBombs = [];
                 gameState.gasClouds = [];
+                gameState.meteors = [];
+                gameState.blackHoles = [];
                 gameState.gasDebuffTimer = 0;
             }
             _spawnEnemy(entry) {
@@ -1820,8 +2066,134 @@
                     this.enemies.push(c);
                 }
             }
+            // Removes a defeated enemy and awards its points — except RayquazaBoss, which
+            // instead triggers the falling-katana slay cutscene. It's kept in the enemies list
+            // (frozen at 0 HP, still visible) until the finishing slash removes it.
+            killEnemy(list, idx) {
+                const enemy = list[idx];
+                if (enemy instanceof RayquazaBoss) {
+                    if (!gameState.slayCutscene) {
+                        this.startRayquazaSlayCutscene(enemy);
+                    }
+                    return;
+                }
+                const pts = (enemy instanceof BossSlime || enemy instanceof WeezingBoss) ? 500 : 50;
+                list.splice(idx, 1);
+                gameState.money += pts;
+                gameState.score = gameState.money;
+            }
+            startRayquazaSlayCutscene(enemy) {
+                gameState.gasDebuffTimer = 0;
+                gameState.slayCutscene = {
+                    stage: 'falling',
+                    timer: 0,
+                    enemy,
+                    katanaX: this.player.x + this.player.width / 2,
+                    katanaY: -60,
+                    katanaAngle: 0
+                };
+            }
+            updateSlayCutscene() {
+                const cut = gameState.slayCutscene;
+                const player = this.player;
+                const bossX = cut.enemy.x + cut.enemy.width / 2;
+                const bossY = cut.enemy.y + cut.enemy.height / 2;
+                cut.timer++;
+                if (cut.stage === 'falling') {
+                    const targetY = player.y - 20;
+                    const t = Math.min(1, cut.timer / 45);
+                    cut.katanaY = -60 + (targetY - -60) * t;
+                    cut.katanaAngle = t * Math.PI * 4;
+                    if (t >= 1) { cut.stage = 'claim'; cut.timer = 0; }
+                } else if (cut.stage === 'claim') {
+                    cut.katanaAngle = Math.sin(cut.timer * 0.3) * 0.15;
+                    if (cut.timer >= 30) {
+                        cut.stage = 'dash';
+                        cut.timer = 0;
+                        cut.dashStartX = player.x;
+                        cut.dashStartY = player.y;
+                        cut.dashTargetX = bossX - (bossX >= player.x ? 60 : -60);
+                    }
+                } else if (cut.stage === 'dash') {
+                    const t = Math.min(1, cut.timer / 22);
+                    player.x = cut.dashStartX + (cut.dashTargetX - cut.dashStartX) * t;
+                    player.direction = bossX >= cut.dashStartX ? Direction.RIGHT : Direction.LEFT;
+                    if (t >= 1) {
+                        cut.stage = 'slash';
+                        cut.timer = 0;
+                        cut.bossX = bossX;
+                        cut.bossY = bossY;
+                        const idx = this.enemies.indexOf(cut.enemy);
+                        if (idx !== -1) this.enemies.splice(idx, 1);
+                        gameState.explosions.push(new Explosion(bossX, bossY, { count: 70, duration: 85 }));
+                        gameState.bossRageFlash = 45;
+                    }
+                } else if (cut.stage === 'slash') {
+                    if (cut.timer >= 25) { cut.stage = 'done'; }
+                } else if (cut.stage === 'done') {
+                    gameState.money += 1000;
+                    gameState.score = gameState.money;
+                    gameState.slayCutscene = null;
+                }
+            }
+            drawKatana(ctx, x, y, angle) {
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.rotate(angle);
+                // Blade
+                ctx.fillStyle = '#e8eef2';
+                ctx.beginPath();
+                ctx.moveTo(0, -46);
+                ctx.quadraticCurveTo(6, -20, 4, 4);
+                ctx.lineTo(-4, 4);
+                ctx.quadraticCurveTo(-5, -20, 0, -46);
+                ctx.fill();
+                ctx.strokeStyle = '#9aa7ad'; ctx.lineWidth = 1; ctx.stroke();
+                // Guard
+                ctx.fillStyle = '#c9a227';
+                ctx.beginPath();
+                ctx.ellipse(0, 6, 9, 3.5, 0, 0, Math.PI * 2);
+                ctx.fill();
+                // Handle
+                ctx.fillStyle = '#2b1d10';
+                ctx.fillRect(-3.5, 8, 7, 20);
+                ctx.strokeStyle = '#000'; ctx.lineWidth = 0.8;
+                for (let i = 0; i < 4; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(-3.5, 11 + i * 4.5);
+                    ctx.lineTo(3.5, 13 + i * 4.5);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+            drawSlayCutscene(ctx) {
+                const cut = gameState.slayCutscene;
+                if (!cut) return;
+                if (cut.stage === 'falling' || cut.stage === 'claim') {
+                    const x = cut.stage === 'falling' ? this.player.x + this.player.width / 2 : this.player.x + this.player.width / 2 + 18;
+                    this.drawKatana(ctx, x, cut.katanaY, cut.katanaAngle);
+                } else if (cut.stage === 'dash') {
+                    const facing = this.player.direction === Direction.RIGHT ? 1 : -1;
+                    this.drawKatana(ctx, this.player.x + this.player.width / 2 + facing * 22, this.player.y + 20, facing * 1.1);
+                } else if (cut.stage === 'slash') {
+                    const t = cut.timer / 25;
+                    ctx.save();
+                    ctx.globalAlpha = Math.max(0, 1 - t);
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 6;
+                    ctx.beginPath();
+                    ctx.arc(cut.bossX, cut.bossY, 70, -Math.PI * 0.6, Math.PI * 0.1);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            }
             update() {
                 if (!gameState.gameRunning) return;
+                this.frameCount++;
+                if (gameState.slayCutscene) {
+                    this.updateSlayCutscene();
+                    return;
+                }
                 // Show level banner for 1.5s at start
                 if (gameState.showLevelBanner) {
                     gameState.levelBannerTimer++;
@@ -1919,10 +2291,7 @@
                             if (Math.hypot(ex - impactX, ey - impactY) <= bomb.blastRadius) {
                                 enemy.health = (enemy.health || enemy.maxHealth || 2) - 15;
                                 if (enemy.health <= 0) {
-                                    const pts = (enemy instanceof BossSlime || enemy instanceof WeezingBoss) ? 500 : 50;
-                                    this.enemies.splice(j, 1);
-                                    gameState.money += pts;
-                                    gameState.score = gameState.money;
+                                    this.killEnemy(this.enemies, j);
                                 }
                             }
                         }
@@ -2002,15 +2371,12 @@
                     for (let i = this.enemies.length - 1; i >= 0; i--) {
                         const enemy = this.enemies[i];
                         if (checkCollision(fireball.getCollisionBox(), enemy.getCollisionBox())) {
-                            const hitDmg = (enemy instanceof BossSlime || enemy instanceof WeezingBoss) ? 10 * gameState.stats.damage : gameState.stats.damage;
+                            const hitDmg = (enemy instanceof BossSlime || enemy instanceof WeezingBoss || enemy instanceof RayquazaBoss) ? 10 * gameState.stats.damage : gameState.stats.damage;
                             enemy.health = (enemy.health || enemy.maxHealth || 2) - hitDmg;
                             fireball.active = false;
                             // if enemy dead, remove and award score
                             if (enemy.health <= 0) {
-                                const pts = (enemy instanceof BossSlime || enemy instanceof WeezingBoss) ? 500 : 50;
-                                this.enemies.splice(i, 1);
-                                gameState.money += pts;
-                                gameState.score = gameState.money;
+                                this.killEnemy(this.enemies, i);
                             }
                         }
                     }
@@ -2071,6 +2437,60 @@
                         gameState.gasDebuffTimer = Math.max(gameState.gasDebuffTimer, 180); // 3s @ 60fps
                     }
                 }
+                // Rayquaza meteors — fall from off-screen and explode on player or ground contact,
+                // splash-damaging the house if they land near it
+                for (let meteor of gameState.meteors) meteor.update();
+                for (let i = gameState.meteors.length - 1; i >= 0; i--) {
+                    const meteor = gameState.meteors[i];
+                    if (checkCollision(meteor.getCollisionBox(), playerBox)) {
+                        gameState.explosions.push(new Explosion(meteor.x, meteor.y, { count: 24, duration: 50 }));
+                        gameState.meteors.splice(i, 1);
+                        gameState.lives--;
+                        if (gameState.lives <= 0) {
+                            revertToCheckpoint();
+                            break; // gameState.meteors was just replaced; stop indexing into the old array
+                        }
+                        continue;
+                    }
+                    if (!meteor.active) {
+                        gameState.explosions.push(new Explosion(meteor.x, meteor.y, { count: 24, duration: 50 }));
+                        if (!this.house.isDestroyed()) {
+                            const houseBox = { x: this.house.x, y: this.house.y, width: this.house.width, height: this.house.height };
+                            if (checkCollision(meteor.getCollisionBox(), houseBox)) {
+                                this.house.takeDamage(20);
+                            }
+                        }
+                        gameState.meteors.splice(i, 1);
+                    }
+                }
+                // Rayquaza black holes — pull the player toward the core while active; core
+                // contact deals a hit and collapses the black hole
+                for (let hole of gameState.blackHoles) hole.update();
+                gameState.blackHoles = gameState.blackHoles.filter(h => h.active);
+                for (let i = gameState.blackHoles.length - 1; i >= 0; i--) {
+                    const hole = gameState.blackHoles[i];
+                    const pcx = this.player.x + this.player.width / 2;
+                    const pcy = this.player.y + this.player.height / 2;
+                    const dx = hole.x - pcx;
+                    const dy = hole.y - pcy;
+                    const dist = Math.max(1, Math.hypot(dx, dy));
+                    if (checkCollision(hole.getCollisionBox(), playerBox)) {
+                        gameState.explosions.push(new Explosion(hole.x, hole.y, { count: 20, duration: 45 }));
+                        gameState.blackHoles.splice(i, 1);
+                        gameState.lives--;
+                        if (gameState.lives <= 0) {
+                            revertToCheckpoint();
+                            break; // gameState.blackHoles was just replaced; stop indexing into the old array
+                        }
+                        continue;
+                    }
+                    if (dist < hole.pullRadius) {
+                        const pull = (1 - dist / hole.pullRadius) * 2.2;
+                        this.player.x += (dx / dist) * pull;
+                        this.player.y += (dy / dist) * pull;
+                        this.player.x = Math.max(0, Math.min(this.player.x, WORLD_WIDTH - this.player.width));
+                    }
+                }
                 // Level clear check — all queued spawns must have appeared and been defeated
                 if (this.enemies.length === 0 && this.spawnQueue.length === 0 && gameState.miniSlimes.length === 0) {
                     gameState.level++;
@@ -2103,6 +2523,31 @@
                         this.spawnEnemies();
                     }
                 }
+            }
+            drawStar(star) {
+                const ctx = this.ctx;
+                const twinkle = 0.55 + 0.45 * Math.sin(this.frameCount * 0.04 + star.twinkle);
+                ctx.save();
+                ctx.globalAlpha = twinkle;
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.r, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+            drawNebula(x, y, scale, hue) {
+                const ctx = this.ctx;
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.scale(scale, scale);
+                const grd = ctx.createRadialGradient(0, 0, 0, 0, 0, 90);
+                grd.addColorStop(0, `rgba(${hue},0.35)`);
+                grd.addColorStop(1, `rgba(${hue},0)`);
+                ctx.fillStyle = grd;
+                ctx.beginPath();
+                ctx.arc(0, 0, 90, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
             }
             drawPollutedCloud(x, y) {
                 const ctx = this.ctx;
@@ -2146,7 +2591,7 @@
             draw() {
                 const biome = getBiome(gameState.level);
                 // Clear screen
-                this.ctx.fillStyle = biome === 'polluted' ? '#8a8a76' : (biome === 'swamp' ? '#7a8f7a' : COLORS.LIGHT_BLUE);
+                this.ctx.fillStyle = biome === 'polluted' ? '#8a8a76' : (biome === 'swamp' ? '#7a8f7a' : (biome === 'galaxy' ? '#0b0518' : COLORS.LIGHT_BLUE));
                 this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
                 // Apply camera offset for all world elements
@@ -2161,6 +2606,11 @@
                     this.ctx.fillStyle = skyGrad;
                 } else if (biome === 'swamp') {
                     this.ctx.fillStyle = '#7a8f7a';
+                } else if (biome === 'galaxy') {
+                    const skyGrad = this.ctx.createLinearGradient(0, 0, 0, SCREEN_HEIGHT - GROUND_HEIGHT);
+                    skyGrad.addColorStop(0, '#04020a');
+                    skyGrad.addColorStop(1, '#241638');
+                    this.ctx.fillStyle = skyGrad;
                 } else {
                     this.ctx.fillStyle = COLORS.LIGHT_BLUE;
                 }
@@ -2169,8 +2619,13 @@
                 if (biome === 'polluted') {
                     for (const c of POLLUTED_CLOUDS) this.drawPollutedCloud(c.x, c.y);
                 }
+                // Galaxy starfield + nebulae
+                if (biome === 'galaxy') {
+                    for (const n of GALAXY_NEBULAE) this.drawNebula(n.x, n.y, n.scale, n.hue);
+                    for (const s of GALAXY_STARS) this.drawStar(s);
+                }
                 // Draw ground
-                this.ctx.fillStyle = biome === 'swamp' ? '#4e5c3a' : COLORS.GREEN;
+                this.ctx.fillStyle = biome === 'swamp' ? '#4e5c3a' : (biome === 'galaxy' ? '#231a35' : COLORS.GREEN);
                 this.ctx.fillRect(0, SCREEN_HEIGHT - GROUND_HEIGHT, WORLD_WIDTH, GROUND_HEIGHT);
                 if (biome === 'swamp') {
                     // Muddy ground texture
@@ -2195,6 +2650,20 @@
                         this.ctx.stroke();
                         this.ctx.restore();
                     }
+                } else if (biome === 'galaxy') {
+                    // Asteroid/moon-rock ground with craters
+                    const groundTop = SCREEN_HEIGHT - GROUND_HEIGHT;
+                    for (const c of GALAXY_CRATERS) {
+                        this.ctx.save();
+                        this.ctx.fillStyle = 'rgba(8, 4, 20, 0.6)';
+                        this.ctx.beginPath();
+                        this.ctx.ellipse(c.x, groundTop + 18, c.r, c.r * 0.5, 0, 0, Math.PI * 2);
+                        this.ctx.fill();
+                        this.ctx.strokeStyle = 'rgba(147, 51, 234, 0.4)';
+                        this.ctx.lineWidth = 1.5;
+                        this.ctx.stroke();
+                        this.ctx.restore();
+                    }
                 } else {
                     // Draw grass pattern
                     this.ctx.strokeStyle = COLORS.DARK_GREEN;
@@ -2216,6 +2685,7 @@
                 for (const drone of this.drones) drone.draw(this.ctx);
                 // Draw player
                 this.player.draw(this.ctx);
+                this.drawSlayCutscene(this.ctx);
                 // Draw enemies
                 for (let enemy of this.enemies) {
                     enemy.draw(this.ctx);
@@ -2246,6 +2716,13 @@
                 }
                 for (let cloud of gameState.gasClouds) {
                     cloud.draw(this.ctx);
+                }
+                // Draw Rayquaza's meteors and black holes
+                for (let meteor of gameState.meteors) {
+                    meteor.draw(this.ctx);
+                }
+                for (let hole of gameState.blackHoles) {
+                    hole.draw(this.ctx);
                 }
 
                 this.ctx.restore(); // Remove camera transform — UI drawn in screen space below
@@ -2374,7 +2851,24 @@
             startGameAtLevel(1);
         }
         function jumpToLevel11() {
-            startGameAtLevel(10);
+            startGameAtLevel(15);
+        }
+        // Admin cheat: press G in-game for a massive stat boost (testing/debug use)
+        function activateAdminCheat() {
+            gameState.lives = 10000;
+            gameState.maxLives = 10000;
+            gameState.money = 1000000;
+            gameState.score = gameState.money;
+            gameState.stats.damage = 100000;
+            gameState.stats.houseHealth = 5000;
+            const game = window.game.gameInstance;
+            if (game && game.house) {
+                game.house.maxHealth = 100000;
+                game.house.health = 100000;
+            }
+            document.getElementById('scoreValue').textContent = gameState.money;
+            document.getElementById('finalScore').textContent = gameState.money;
+            updateStatsDisplay();
         }
         // Snapshots progress at the start of each post-boss level (1, 6, 11, ...) so a full wipe
         // can revert there instead of ending the run.
@@ -2675,6 +3169,10 @@
                 if (e.key === 'b' || e.key === 'B') {
                     jumpToLevel11();
                 }
+                // Admin cheat: 10000 lives, 1,000,000 cash, 100000 house HP, 100000 damage
+                if (e.key === 'g' || e.key === 'G') {
+                    activateAdminCheat();
+                }
             });
             document.addEventListener('keyup', (e) => {
                 if (e.code === 'Space') {
@@ -2695,7 +3193,7 @@
 
             game.canvas.addEventListener('mousedown', (e) => {
                 if (e.button !== 0) return;
-                if (gameState.cutsceneActive || gameState.paused || !gameState.gameRunning || gameState.showLevelBanner) return;
+                if (gameState.cutsceneActive || gameState.paused || !gameState.gameRunning || gameState.showLevelBanner || gameState.slayCutscene) return;
                 if (gameState.gasDebuffTimer > 0) return; // can't shoot while gassed
                 const player = game.player;
                 const targetX = gameState.mouseWorldX || (player.direction === Direction.LEFT ? player.x - 200 : player.x + 200);
