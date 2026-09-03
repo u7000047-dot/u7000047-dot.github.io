@@ -402,6 +402,10 @@
         const FPS = 60;
         const WORLD_WIDTH = SCREEN_WIDTH * 2;
         const VERSION = '1.0';
+        const KATANA_MAX_ACTIVE_FRAMES = FPS * 3; // deflect can be held for at most 3s
+        const KATANA_COOLDOWN_FRAMES = FPS * 5;   // then needs a 5s cooldown before it can be used again
+        const KATANA_MELEE_SWING_FRAMES = 14;     // visual swing duration for a melee tap (damage applies instantly)
+        const KATANA_MELEE_REACH = 90;
         // Colors
         const COLORS = {
             WHITE: '#ffffff',
@@ -481,6 +485,12 @@
             meteors: [],
             blackHoles: [],
             slayCutscene: null, // drives the falling-katana finisher sequence when Rayquaza is defeated
+            katanaHeld: false, // raw input: right mouse button currently held (before cooldown/duration gating)
+            katanaDeflectActive: false, // true while the katana is actually equipped/deflecting this frame (held, level 16+, and off cooldown)
+            katanaActiveTimer: 0, // frames spent deflecting during the current activation, capped at KATANA_MAX_ACTIVE_FRAMES
+            katanaCooldownTimer: 0, // frames remaining before the katana can be equipped again; 0 = ready
+            katanaMeleeSwingTimer: 0, // frames remaining in the current melee swing's visual animation
+            katanaMeleeFacing: 1, // facing direction the last melee swing was thrown in, for drawing
             gasDebuffTimer: 0, // >0 while the player can't shoot / has tunnel vision from touching Weezing's gas
             level: 1,
             levelBannerTimer: 0,
@@ -503,6 +513,44 @@
             LEFT: 1,
             RIGHT: 2
         };
+        // Hand-drawn katana — used for the level 15 slay cutscene and the permanent holstered
+        // katana the player carries from level 16 onward.
+        function drawKatana(ctx, x, y, angle) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            // Blade — long, gently curved katana blade (not a stubby knife)
+            ctx.fillStyle = '#e8eef2';
+            ctx.beginPath();
+            ctx.moveTo(1, -108);
+            ctx.quadraticCurveTo(10, -50, 5, 4);
+            ctx.lineTo(-4, 4);
+            ctx.quadraticCurveTo(-6, -50, 1, -108);
+            ctx.fill();
+            ctx.strokeStyle = '#9aa7ad'; ctx.lineWidth = 1; ctx.stroke();
+            // Blood groove / edge highlight down the center of the blade
+            ctx.strokeStyle = 'rgba(140,150,155,0.6)'; ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(1, -100);
+            ctx.lineTo(1, 2);
+            ctx.stroke();
+            // Guard
+            ctx.fillStyle = '#c9a227';
+            ctx.beginPath();
+            ctx.ellipse(0, 6, 10, 3.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // Handle
+            ctx.fillStyle = '#2b1d10';
+            ctx.fillRect(-3.5, 8, 7, 22);
+            ctx.strokeStyle = '#000'; ctx.lineWidth = 0.8;
+            for (let i = 0; i < 4; i++) {
+                ctx.beginPath();
+                ctx.moveTo(-3.5, 11 + i * 5);
+                ctx.lineTo(3.5, 13 + i * 5);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
         // Player class
         class Player {
             constructor(x, y) {
@@ -579,14 +627,32 @@
             draw(ctx) {
                 this.loadSpriteAsset();
 
-                if (this.characterImage.complete) {
-                    const scale = this.getSpriteScale();
+                const hasSprite = this.characterImage.complete && this.characterImage.naturalWidth > 0;
+                const scale = this.getSpriteScale();
+                let drawWidth = this.width, drawHeight = this.height, drawX = this.x, drawY = this.y;
+                if (hasSprite) {
                     const aspectRatio = this.characterImage.naturalWidth / Math.max(this.characterImage.naturalHeight, 1);
-                    const drawHeight = this.height * scale;
-                    const drawWidth = drawHeight * aspectRatio;
-                    const drawX = this.x + (this.width - drawWidth) / 2;
-                    const drawY = this.y + (this.height - drawHeight) / 2;
+                    drawHeight = this.height * scale;
+                    drawWidth = drawHeight * aspectRatio;
+                    drawX = this.x + (this.width - drawWidth) / 2;
+                    drawY = this.y + (this.height - drawHeight) / 2;
+                }
+                const facing = this.direction === Direction.LEFT ? -1 : 1;
+                const meleeSwinging = gameState.katanaMeleeSwingTimer > 0;
+                const katanaEquipped = gameState.level >= 16 && (gameState.katanaDeflectActive || meleeSwinging);
 
+                // Sheathed katana on the back — drawn behind the sprite so it peeks out over the
+                // shoulder rather than covering the character. Shown whenever the katana isn't
+                // actively equipped (right-click held or mid-swing).
+                if (gameState.level >= 16 && !katanaEquipped) {
+                    ctx.save();
+                    ctx.translate(drawX + drawWidth * 0.5 - facing * drawWidth * 0.22, drawY + drawHeight * 0.42);
+                    ctx.scale(drawHeight / 230, drawHeight / 230);
+                    drawKatana(ctx, 0, 0, facing * 0.55);
+                    ctx.restore();
+                }
+
+                if (hasSprite) {
                     ctx.save();
                     if (this.direction === Direction.RIGHT) {
                         ctx.translate(drawX + drawWidth, drawY);
@@ -600,6 +666,37 @@
                     // Fallback while image is loading
                     ctx.fillStyle = COLORS.RED;
                     ctx.fillRect(this.x, this.y, this.width, this.height);
+                }
+
+                // Equipped katana — drawn last (on top of the sprite) and out in front of the
+                // body in the direction Charizard is facing, like it's gripped and held ready,
+                // rather than the small sheathed silhouette peeking from behind. Shown while
+                // right-click is held (deflecting) or mid-swing (a melee tap). A pulsing ring
+                // signals the deflect window specifically.
+                if (gameState.katanaDeflectActive) {
+                    ctx.save();
+                    ctx.globalAlpha = 0.35 + 0.2 * Math.sin(performance.now() * 0.012);
+                    ctx.strokeStyle = '#8fe3ff';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(this.x + this.width / 2, this.y + this.height / 2, Math.max(drawWidth, drawHeight) * 0.55, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+                if (katanaEquipped) {
+                    // Held-ready pose while deflecting; a fast slash arc (raised -> forward) while swinging.
+                    let angle = facing * 0.75;
+                    if (meleeSwinging) {
+                        const t = 1 - gameState.katanaMeleeSwingTimer / KATANA_MELEE_SWING_FRAMES;
+                        angle = facing * (1.5 - t * 2.1);
+                    }
+                    ctx.save();
+                    ctx.translate(drawX + drawWidth * 0.5 + facing * drawWidth * 0.4, drawY + drawHeight * 0.52);
+                    ctx.scale(drawHeight / 170, drawHeight / 170);
+                    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+                    ctx.shadowBlur = 6;
+                    drawKatana(ctx, 0, 0, angle);
+                    ctx.restore();
                 }
             }
             getCollisionBox() {
@@ -652,7 +749,7 @@
                 const speed = 6 + gameState.level * 0.5;
                 const vx = dx / mag * speed;
                 const vy = dy / mag * speed;
-                gameState.enemyFireballs.push(new EnemyFireball(startX, startY, vx, vy));
+                gameState.enemyFireballs.push(new EnemyFireball(startX, startY, vx, vy, this));
             }
             draw(ctx) {
                 // Draw body
@@ -686,13 +783,14 @@
         }
         // EnemyFireball class
         class EnemyFireball {
-            constructor(x, y, vx, vy) {
+            constructor(x, y, vx, vy, owner = null) {
                 this.x = x;
                 this.y = y;
                 this.radius = 10;
                 this.vx = vx;
                 this.vy = vy;
                 this.active = true;
+                this.owner = owner; // the Enemy that fired this — used to aim a katana deflection back at it
             }
             update() {
                 this.x += this.vx;
@@ -2066,6 +2164,58 @@
                     this.enemies.push(c);
                 }
             }
+            // Gates the raw right-click hold (gameState.katanaHeld) behind the level-16
+            // requirement, the 3s max active duration, and the 5s cooldown that follows any use
+            // (whether it was released early or ran out the full 3s). Produces the effective
+            // gameState.katanaDeflectActive flag that collision + drawing both read. Also ticks
+            // the melee swing animation, which runs independently of the deflect cooldown.
+            updateKatanaAbility() {
+                if (gameState.katanaMeleeSwingTimer > 0) gameState.katanaMeleeSwingTimer--;
+                if (gameState.katanaCooldownTimer > 0) {
+                    gameState.katanaCooldownTimer--;
+                    gameState.katanaDeflectActive = false;
+                    return;
+                }
+                if (gameState.level >= 16 && gameState.katanaHeld) {
+                    gameState.katanaDeflectActive = true;
+                    gameState.katanaActiveTimer++;
+                    if (gameState.katanaActiveTimer >= KATANA_MAX_ACTIVE_FRAMES) {
+                        gameState.katanaDeflectActive = false;
+                        gameState.katanaActiveTimer = 0;
+                        gameState.katanaCooldownTimer = KATANA_COOLDOWN_FRAMES;
+                    }
+                } else {
+                    if (gameState.katanaDeflectActive) {
+                        // Was active and just released before hitting the cap — still costs the cooldown.
+                        gameState.katanaCooldownTimer = KATANA_COOLDOWN_FRAMES;
+                    }
+                    gameState.katanaDeflectActive = false;
+                    gameState.katanaActiveTimer = 0;
+                }
+            }
+            // A quick right-click tap (as opposed to holding, which deflects) swings the katana
+            // as a melee weapon: an instant hit-check in a short reach in front of the player,
+            // using the same damage stat and boss multiplier as fireballs.
+            katanaMeleeAttack() {
+                if (gameState.level < 16) return;
+                const player = this.player;
+                const facing = player.direction === Direction.LEFT ? -1 : 1;
+                const box = {
+                    x: facing === 1 ? player.x + player.width : player.x - KATANA_MELEE_REACH,
+                    y: player.y - 10,
+                    width: KATANA_MELEE_REACH,
+                    height: player.height + 20
+                };
+                for (let i = this.enemies.length - 1; i >= 0; i--) {
+                    const enemy = this.enemies[i];
+                    if (!checkCollision(box, enemy.getCollisionBox())) continue;
+                    const hitDmg = (enemy instanceof BossSlime || enemy instanceof WeezingBoss || enemy instanceof RayquazaBoss) ? 10 * gameState.stats.damage : gameState.stats.damage;
+                    enemy.health = (enemy.health || enemy.maxHealth || 2) - hitDmg;
+                    if (enemy.health <= 0) this.killEnemy(this.enemies, i);
+                }
+                gameState.katanaMeleeSwingTimer = KATANA_MELEE_SWING_FRAMES;
+                gameState.katanaMeleeFacing = facing;
+            }
             // Removes a defeated enemy and awards its points — except RayquazaBoss, which
             // instead triggers the falling-katana slay cutscene. It's kept in the enemies list
             // (frozen at 0 HP, still visible) until the finishing slash removes it.
@@ -2136,34 +2286,25 @@
                     gameState.slayCutscene = null;
                 }
             }
-            drawKatana(ctx, x, y, angle) {
+            // Brief white slash arc in front of the player marking a melee hit — independent of
+            // the (much bigger) finishing-blow slash used in the Rayquaza slay cutscene.
+            drawMeleeSlash(ctx) {
+                if (gameState.katanaMeleeSwingTimer <= 0) return;
+                const facing = gameState.katanaMeleeFacing;
+                const t = gameState.katanaMeleeSwingTimer / KATANA_MELEE_SWING_FRAMES;
+                const cx = this.player.x + this.player.width / 2 + facing * KATANA_MELEE_REACH * 0.5;
+                const cy = this.player.y + this.player.height / 2;
                 ctx.save();
-                ctx.translate(x, y);
-                ctx.rotate(angle);
-                // Blade
-                ctx.fillStyle = '#e8eef2';
+                ctx.globalAlpha = Math.max(0, t);
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 5;
                 ctx.beginPath();
-                ctx.moveTo(0, -46);
-                ctx.quadraticCurveTo(6, -20, 4, 4);
-                ctx.lineTo(-4, 4);
-                ctx.quadraticCurveTo(-5, -20, 0, -46);
-                ctx.fill();
-                ctx.strokeStyle = '#9aa7ad'; ctx.lineWidth = 1; ctx.stroke();
-                // Guard
-                ctx.fillStyle = '#c9a227';
-                ctx.beginPath();
-                ctx.ellipse(0, 6, 9, 3.5, 0, 0, Math.PI * 2);
-                ctx.fill();
-                // Handle
-                ctx.fillStyle = '#2b1d10';
-                ctx.fillRect(-3.5, 8, 7, 20);
-                ctx.strokeStyle = '#000'; ctx.lineWidth = 0.8;
-                for (let i = 0; i < 4; i++) {
-                    ctx.beginPath();
-                    ctx.moveTo(-3.5, 11 + i * 4.5);
-                    ctx.lineTo(3.5, 13 + i * 4.5);
-                    ctx.stroke();
+                if (facing >= 0) {
+                    ctx.arc(cx, cy, 45, -Math.PI * 0.55, Math.PI * 0.15);
+                } else {
+                    ctx.arc(cx, cy, 45, Math.PI * 1.15, Math.PI * 1.85);
                 }
+                ctx.stroke();
                 ctx.restore();
             }
             drawSlayCutscene(ctx) {
@@ -2171,10 +2312,10 @@
                 if (!cut) return;
                 if (cut.stage === 'falling' || cut.stage === 'claim') {
                     const x = cut.stage === 'falling' ? this.player.x + this.player.width / 2 : this.player.x + this.player.width / 2 + 18;
-                    this.drawKatana(ctx, x, cut.katanaY, cut.katanaAngle);
+                    drawKatana(ctx, x, cut.katanaY, cut.katanaAngle);
                 } else if (cut.stage === 'dash') {
                     const facing = this.player.direction === Direction.RIGHT ? 1 : -1;
-                    this.drawKatana(ctx, this.player.x + this.player.width / 2 + facing * 22, this.player.y + 20, facing * 1.1);
+                    drawKatana(ctx, this.player.x + this.player.width / 2 + facing * 22, this.player.y + 20, facing * 1.1);
                 } else if (cut.stage === 'slash') {
                     const t = cut.timer / 25;
                     ctx.save();
@@ -2211,6 +2352,7 @@
                     }
                 }
                 this.player.update(gameState.keys);
+                this.updateKatanaAbility();
                 if (this.repairman) this.repairman.update();
                 // Spread drones across different enemies, but once every enemy already has a drone
                 // (e.g. only one is left), let the rest pile onto the nearest remaining target
@@ -2381,14 +2523,26 @@
                         }
                     }
                 }
-                // Enemy fireball - player collision
+                // Enemy fireball - player collision. From level 16 on, holding right-click
+                // equips the katana and deflects incoming bullets back at whichever enemy
+                // fired them instead of costing a life.
                 const playerBox = this.player.getCollisionBox();
-                for (let efb of gameState.enemyFireballs) {
-                    if (checkCollision(playerBox, efb.getCollisionBox())) {
+                for (let i = gameState.enemyFireballs.length - 1; i >= 0; i--) {
+                    const efb = gameState.enemyFireballs[i];
+                    if (!checkCollision(playerBox, efb.getCollisionBox())) continue;
+                    if (gameState.level >= 16 && gameState.katanaDeflectActive) {
+                        gameState.enemyFireballs.splice(i, 1);
+                        const owner = efb.owner;
+                        const ownerAlive = owner && this.enemies.includes(owner);
+                        const targetX = ownerAlive ? owner.x + owner.width / 2 : efb.x - efb.vx * 20;
+                        const targetY = ownerAlive ? owner.y + owner.height / 2 : efb.y - efb.vy * 20;
+                        gameState.fireballs.push(new Fireball(efb.x, efb.y, targetX, targetY));
+                    } else {
                         efb.active = false;
                         gameState.lives--;
                         if (gameState.lives <= 0) {
                             revertToCheckpoint();
+                            break;
                         }
                     }
                 }
@@ -2724,6 +2878,7 @@
                 for (let hole of gameState.blackHoles) {
                     hole.draw(this.ctx);
                 }
+                this.drawMeleeSlash(this.ctx);
 
                 this.ctx.restore(); // Remove camera transform — UI drawn in screen space below
 
@@ -2737,6 +2892,25 @@
                 this.ctx.textAlign = 'left';
                 this.ctx.fillText('Lives: ' + gameState.lives, 20, 60);
                 this.ctx.restore();
+                // Katana status HUD (level 16+): ready, active countdown, or cooldown countdown
+                if (gameState.level >= 16) {
+                    this.ctx.save();
+                    this.ctx.font = 'bold 16px Arial';
+                    this.ctx.textAlign = 'left';
+                    if (gameState.katanaCooldownTimer > 0) {
+                        const secs = (gameState.katanaCooldownTimer / FPS).toFixed(1);
+                        this.ctx.fillStyle = '#ff6b4a';
+                        this.ctx.fillText('Katana cooldown: ' + secs + 's', 20, 84);
+                    } else if (gameState.katanaDeflectActive) {
+                        const secs = ((KATANA_MAX_ACTIVE_FRAMES - gameState.katanaActiveTimer) / FPS).toFixed(1);
+                        this.ctx.fillStyle = '#8fe3ff';
+                        this.ctx.fillText('Katana deflecting: ' + secs + 's', 20, 84);
+                    } else {
+                        this.ctx.fillStyle = '#7ec8e3';
+                        this.ctx.fillText('Katana ready (hold right-click)', 20, 84);
+                    }
+                    this.ctx.restore();
+                }
                 // Boss rage screen flash
                 if (gameState.bossRageFlash > 0) {
                     const flashAlpha = (gameState.bossRageFlash / 90) * 0.45;
@@ -2816,6 +2990,11 @@
             gameState.explosions = [];
             gameState.miniSlimes = [];
             gameState.bossRageFlash = 0;
+            gameState.katanaHeld = false;
+            gameState.katanaDeflectActive = false;
+            gameState.katanaActiveTimer = 0;
+            gameState.katanaCooldownTimer = 0;
+            gameState.katanaMeleeSwingTimer = 0;
             gameState.showLevelBanner = true;
             gameState.levelBannerTimer = 0;
             gameState.paused = false;
@@ -2899,6 +3078,11 @@
             gameState.miniSlimes = [];
             gameState.bombs = [];
             gameState.bossRageFlash = 0;
+            gameState.katanaHeld = false;
+            gameState.katanaDeflectActive = false;
+            gameState.katanaActiveTimer = 0;
+            gameState.katanaCooldownTimer = 0;
+            gameState.katanaMeleeSwingTimer = 0;
             gameState.showLevelBanner = true;
             gameState.levelBannerTimer = 0;
             const game = window.game.gameInstance;
@@ -2979,6 +3163,11 @@
                         droneCost: state.shop?.droneCost ?? 200
                     };
                     gameState.bossRageFlash = 0;
+                    gameState.katanaHeld = false;
+                    gameState.katanaDeflectActive = false;
+                    gameState.katanaActiveTimer = 0;
+                    gameState.katanaCooldownTimer = 0;
+                    gameState.katanaMeleeSwingTimer = 0;
                     gameState.showLevelBanner = true;
                     gameState.levelBannerTimer = 0;
                     gameState.paused = false;
@@ -3173,6 +3362,10 @@
                 if (e.key === 'g' || e.key === 'G') {
                     activateAdminCheat();
                 }
+                // Debug: jump straight to level 16 to test the katana/deflect mechanic
+                if (e.key === 'n' || e.key === 'N') {
+                    startGameAtLevel(16);
+                }
             });
             document.addEventListener('keyup', (e) => {
                 if (e.code === 'Space') {
@@ -3183,23 +3376,48 @@
                 }
             });
 
+            // Right-click hold is tracked off e.buttons (a live bitmask of which buttons are
+            // currently down) rather than only off discrete mousedown/mouseup button==2 events,
+            // so it can't get stuck out of sync if a down/up event is missed (focus changes,
+            // the button being pressed before the page had listeners, etc). Bit 2 = right button.
+            // This only records raw input — Game.updateKatanaAbility() applies the level gate,
+            // the 3s max-active duration, and the 5s cooldown on top of it every tick.
+            function syncKatanaHold(e) {
+                const rightHeld = (e.buttons & 2) === 2;
+                gameState.katanaHeld = rightHeld && !gameState.cutsceneActive && !gameState.paused &&
+                    gameState.gameRunning && !gameState.showLevelBanner && !gameState.slayCutscene;
+            }
+
             game.canvas.addEventListener('mousemove', (e) => {
                 const rect = game.canvas.getBoundingClientRect();
                 const screenX = e.clientX - rect.left;
                 const screenY = e.clientY - rect.top;
                 gameState.mouseWorldX = screenX + game.cameraX;
                 gameState.mouseWorldY = screenY;
+                syncKatanaHold(e);
             });
 
             game.canvas.addEventListener('mousedown', (e) => {
-                if (e.button !== 0) return;
+                syncKatanaHold(e);
                 if (gameState.cutsceneActive || gameState.paused || !gameState.gameRunning || gameState.showLevelBanner || gameState.slayCutscene) return;
+                if (e.button === 2) {
+                    // A press swings the katana as melee; continuing to hold also engages deflect
+                    // (handled by syncKatanaHold/updateKatanaAbility above).
+                    game.katanaMeleeAttack();
+                    return;
+                }
+                if (e.button !== 0) return;
                 if (gameState.gasDebuffTimer > 0) return; // can't shoot while gassed
                 const player = game.player;
                 const targetX = gameState.mouseWorldX || (player.direction === Direction.LEFT ? player.x - 200 : player.x + 200);
                 const targetY = gameState.mouseWorldY || (player.y + player.height / 2);
                 gameState.fireballs.push(new Fireball(player.x + player.width / 2, player.y + player.height / 2, targetX, targetY));
             });
+            game.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+            // Fallback releases in case a mousemove/mousedown never fires after the button lifts
+            // (release outside the window, alt-tab while held, etc).
+            document.addEventListener('mouseup', (e) => { if (e.button === 2) gameState.katanaHeld = false; });
+            window.addEventListener('blur', () => { gameState.katanaHeld = false; });
         });
     </script>
     <script type="module">
