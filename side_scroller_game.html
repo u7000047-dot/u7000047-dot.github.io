@@ -279,6 +279,67 @@
             font-size: 15px; font-weight: bold; transition: background 0.2s;
         }
         #shopMenu .close-btn:hover { background: #764ba2; }
+        #scoreboardBtn {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(165px);
+            background: rgba(15, 45, 55, 0.88);
+            color: #4fc3f7;
+            border: 2px solid #4fc3f7;
+            padding: 6px 18px;
+            font-size: 15px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: Arial, sans-serif;
+            z-index: 10;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+        #scoreboardBtn:hover { background: rgba(20, 70, 85, 0.95); }
+        #scoreboardMenu {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(10, 10, 30, 0.97);
+            color: white;
+            padding: 36px 44px;
+            border-radius: 12px;
+            text-align: center;
+            display: none;
+            z-index: 210;
+            min-width: 420px;
+            max-width: 480px;
+            border: 2px solid #4fc3f7;
+            box-shadow: 0 0 40px rgba(79, 195, 247, 0.25);
+        }
+        #scoreboardMenu h2 { font-size: 26px; margin-bottom: 6px; color: #4fc3f7; }
+        #scoreboardMenu .pts { font-size: 14px; color: #aaa; margin-bottom: 16px; min-height: 18px; }
+        #scoreboardMenu .sb-list {
+            list-style: none; margin: 0 0 18px 0; padding: 0;
+            max-height: 260px; overflow-y: auto; text-align: left;
+        }
+        #scoreboardMenu .sb-row {
+            display: flex; align-items: center; gap: 10px;
+            padding: 6px 4px; font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        #scoreboardMenu .sb-rank { width: 30px; color: #4fc3f7; font-weight: bold; }
+        #scoreboardMenu .sb-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #scoreboardMenu .sb-score { width: 70px; text-align: right; color: #ffd700; font-weight: bold; }
+        #scoreboardMenu .sb-level { width: 50px; text-align: right; color: #7ec8e3; }
+        #scoreboardMenu .sb-submit-row { display: flex; gap: 8px; margin-bottom: 4px; }
+        #scoreboardMenu .sb-name-input {
+            flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #4fc3f7;
+            background: rgba(255,255,255,0.05); color: white; font-size: 14px; font-family: Arial, sans-serif;
+        }
+        #scoreboardMenu .close-btn {
+            margin-top: 18px; background: #667eea; color: white; border: none;
+            padding: 10px 34px; border-radius: 6px; cursor: pointer;
+            font-size: 15px; font-weight: bold; transition: background 0.2s;
+        }
+        #scoreboardMenu .close-btn:hover { background: #764ba2; }
         #charizardCutscene {
             position: absolute;
             top: 0;
@@ -364,7 +425,9 @@
     {
         "imports": {
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+            "firebase/app": "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js"
         }
     }
     </script>
@@ -380,6 +443,7 @@
         <div id="score" class="info">Money: <span id="scoreValue">0</span></div>
         <button id="statsBtn" onclick="showStatsMenu()">Stats <span id="statsBadge">0</span></button>
         <button id="shopBtn" onclick="showShopMenu()">Shop</button>
+        <button id="scoreboardBtn" onclick="showScoreboardMenu()">&#127942; Scores</button>
         <div id="controls" class="info">A/D: Move | Space: Jump | Left Click: Shoot | ESC: Menu</div>        <div id="version" class="info">v1.0</div>        <div id="shopMenu">
             <h2>&#128736; Shop</h2>
             <div class="stat-row">
@@ -418,6 +482,16 @@
                 <button class="upg-btn" onclick="upgradeStat('speed')">+1 &nbsp;(1pt)</button>
             </div>
             <button class="close-btn" onclick="closeStatsMenu()">Close</button>
+        </div>
+        <div id="scoreboardMenu">
+            <h2>&#127942; Global Scoreboard</h2>
+            <div class="pts" id="scoreboardStatus">Loading...</div>
+            <ol id="scoreboardList" class="sb-list"></ol>
+            <div class="sb-submit-row">
+                <input type="text" id="scoreboardNameInput" class="sb-name-input" maxlength="20" placeholder="Your name">
+                <button class="upg-btn" id="scoreboardSubmitBtn" onclick="submitMyScore()">Submit My Score</button>
+            </div>
+            <button class="close-btn" onclick="closeScoreboardMenu()">Close</button>
         </div>
         <div id="gameOver">
             <h1>Game Over!</h1>
@@ -530,6 +604,7 @@
             paused: false,
             statsOpen: false,
             shopOpen: false,
+            scoreboardOpen: false,
             cutsceneActive: false,
             keys: {},
             shop: { autoRepair: false, autoRepairLevel: 0, autoRepairCost: 100, drone: false, droneLevel: 0, droneCost: 200 },
@@ -3000,6 +3075,7 @@
                         window.playCharizardWinCutscene(() => {
                             gameState.cutsceneActive = false;
                             gameState.gameRunning = true;
+                            promptScoreSubmission();
                             this.spawnEnemies();
                         });
                     } else {
@@ -3435,6 +3511,7 @@
                 window.playCharizardWinCutscene(() => {
                     gameState.cutsceneActive = false;
                     gameState.gameRunning = true;
+                    promptScoreSubmission();
                     game.spawnEnemies();
                 });
             } else {
@@ -3446,6 +3523,13 @@
             saveCheckpoint();
         }
         function resetGame() {
+            if (gameState.money > 0) {
+                if (confirm(`Submit your score of ${gameState.money} to the global scoreboard before resetting?`)) {
+                    document.getElementById('pauseMenu').style.display = 'none';
+                    showScoreboardMenu();
+                    return;
+                }
+            }
             startGameAtLevel(1);
         }
         function jumpToLevel11() {
@@ -3644,6 +3728,90 @@
             document.getElementById('statsMenu').style.display = 'none';
             gameState.statsOpen = false;
             if (!gameState.paused) gameState.gameRunning = true;
+        }
+        // --- Scoreboard Menu ---
+        // localStorage is used only to remember the player's display name locally. The shared
+        // score data itself lives in Firestore (see the module script near the end of the file).
+        const SCOREBOARD_NAME_KEY = 'sideScrollerScoreboardName';
+        function getSavedScoreboardName() {
+            try { return localStorage.getItem(SCOREBOARD_NAME_KEY) || ''; }
+            catch (e) { return ''; } // private browsing / storage disabled — degrade silently
+        }
+        function saveScoreboardName(name) {
+            try { localStorage.setItem(SCOREBOARD_NAME_KEY, name); }
+            catch (e) { /* ignore */ }
+        }
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = String(str ?? '');
+            return div.innerHTML;
+        }
+        function showScoreboardMenu() {
+            gameState.scoreboardOpen = true;
+            if (!gameState.paused) gameState.gameRunning = false;
+            document.getElementById('scoreboardNameInput').value = getSavedScoreboardName();
+            document.getElementById('scoreboardMenu').style.display = 'block';
+            refreshScoreboardDisplay();
+        }
+        function closeScoreboardMenu() {
+            document.getElementById('scoreboardMenu').style.display = 'none';
+            gameState.scoreboardOpen = false;
+            if (!gameState.paused) gameState.gameRunning = true;
+        }
+        async function refreshScoreboardDisplay() {
+            const statusEl = document.getElementById('scoreboardStatus');
+            const listEl = document.getElementById('scoreboardList');
+            listEl.innerHTML = '';
+            if (typeof window.fetchTopScores !== 'function') {
+                statusEl.textContent = 'Scoreboard unavailable.';
+                return;
+            }
+            statusEl.textContent = 'Loading...';
+            try {
+                const scores = await window.fetchTopScores(15);
+                statusEl.textContent = scores.length ? '' : 'No scores yet — be the first!';
+                scores.forEach((s, i) => {
+                    const li = document.createElement('li');
+                    li.className = 'sb-row';
+                    li.innerHTML = `<span class="sb-rank">#${i + 1}</span>` +
+                        `<span class="sb-name">${escapeHtml(s.name)}</span>` +
+                        `<span class="sb-score">${s.score}</span>` +
+                        `<span class="sb-level">Lv ${s.level}</span>`;
+                    listEl.appendChild(li);
+                });
+            } catch (err) {
+                console.error('Failed to load scoreboard', err);
+                statusEl.textContent = 'Failed to load scoreboard. Check your connection.';
+            }
+        }
+        async function submitMyScore() {
+            const nameInput = document.getElementById('scoreboardNameInput');
+            const submitBtn = document.getElementById('scoreboardSubmitBtn');
+            const statusEl = document.getElementById('scoreboardStatus');
+            const name = (nameInput.value || '').trim() || 'Anonymous';
+            if (typeof window.submitScore !== 'function') {
+                statusEl.textContent = 'Scoreboard unavailable.';
+                return;
+            }
+            submitBtn.disabled = true;
+            statusEl.textContent = 'Submitting...';
+            try {
+                await window.submitScore(name, gameState.money, gameState.level);
+                saveScoreboardName(name);
+                statusEl.textContent = 'Score submitted!';
+                await refreshScoreboardDisplay();
+            } catch (err) {
+                console.error('Failed to submit score', err);
+                statusEl.textContent = 'Failed to submit score. Try again later.';
+            } finally {
+                submitBtn.disabled = false;
+            }
+        }
+        // Auto-invoked once, right after the level-21 win cutscene finishes.
+        function promptScoreSubmission() {
+            showScoreboardMenu();
+            const statusEl = document.getElementById('scoreboardStatus');
+            if (statusEl) statusEl.textContent = 'You won! Submit your score below.';
         }
         function updateShopDisplay() {
             const autoRepairBtn = document.getElementById('buyAutoRepairBtn');
@@ -4199,6 +4367,66 @@
         // waiting for the level-11 cutscene to trigger it on demand.
         window.__preloadCharizardModel = function(onProgress) {
             return loadCharizardScene(onProgress);
+        };
+    </script>
+    <script type="module">
+        // --- Global Scoreboard (Firebase Firestore) ---
+        // Firebase project config: replace the placeholders below with the values from
+        // Firebase Console > Project settings > General > Your apps > Web app > SDK setup and configuration.
+        // NOTE: this apiKey is not a secret — access is enforced by Firestore Security Rules, not this key.
+        const firebaseConfig = {
+            apiKey: "REPLACE_ME",
+            authDomain: "REPLACE_ME.firebaseapp.com",
+            projectId: "REPLACE_ME",
+            storageBucket: "REPLACE_ME.appspot.com",
+            messagingSenderId: "REPLACE_ME",
+            appId: "REPLACE_ME"
+        };
+
+        import { initializeApp } from 'firebase/app';
+        import {
+            getFirestore, collection, addDoc, query, orderBy, limit, getDocs, serverTimestamp
+        } from 'firebase/firestore';
+
+        const SCORES_COLLECTION = 'scores';
+        // With a misconfigured/placeholder project, the Firestore SDK doesn't reject quickly —
+        // it retries its long-poll connection indefinitely, which would leave the scoreboard UI
+        // stuck on "Loading..."/"Submitting..." forever. Race every call against a timeout so a
+        // bad config surfaces as a clear error instead of a silent hang.
+        const FIRESTORE_TIMEOUT_MS = 8000;
+        function withTimeout(promise, ms) {
+            return Promise.race([
+                promise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out contacting the scoreboard.')), ms))
+            ]);
+        }
+
+        let db = null;
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+        } catch (err) {
+            console.error('Firebase init failed — scoreboard will be unavailable.', err);
+        }
+
+        window.submitScore = async function submitScore(name, score, level) {
+            if (!db) throw new Error('Scoreboard is not configured.');
+            const cleanName = String(name || 'Anonymous').trim().slice(0, 20) || 'Anonymous';
+            const cleanScore = Math.max(0, Math.floor(Number(score) || 0));
+            const cleanLevel = Math.max(1, Math.floor(Number(level) || 1));
+            await withTimeout(addDoc(collection(db, SCORES_COLLECTION), {
+                name: cleanName,
+                score: cleanScore,
+                level: cleanLevel,
+                timestamp: serverTimestamp()
+            }), FIRESTORE_TIMEOUT_MS);
+        };
+
+        window.fetchTopScores = async function fetchTopScores(n = 10) {
+            if (!db) throw new Error('Scoreboard is not configured.');
+            const q = query(collection(db, SCORES_COLLECTION), orderBy('score', 'desc'), limit(n));
+            const snapshot = await withTimeout(getDocs(q), FIRESTORE_TIMEOUT_MS);
+            return snapshot.docs.map(d => d.data());
         };
     </script>
 </body>
