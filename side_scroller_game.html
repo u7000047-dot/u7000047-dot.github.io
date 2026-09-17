@@ -2937,6 +2937,14 @@
                             gameState.gameRunning = true;
                             this.spawnEnemies();
                         });
+                    } else if (gameState.level === 21 && typeof window.playCharizardWinCutscene === 'function') {
+                        gameState.gameRunning = false;
+                        gameState.cutsceneActive = true;
+                        window.playCharizardWinCutscene(() => {
+                            gameState.cutsceneActive = false;
+                            gameState.gameRunning = true;
+                            this.spawnEnemies();
+                        });
                     } else {
                         this.spawnEnemies();
                     }
@@ -3364,6 +3372,14 @@
                     gameState.gameRunning = true;
                     game.spawnEnemies();
                 });
+            } else if (level === 21 && typeof window.playCharizardWinCutscene === 'function') {
+                gameState.gameRunning = false;
+                gameState.cutsceneActive = true;
+                window.playCharizardWinCutscene(() => {
+                    gameState.cutsceneActive = false;
+                    gameState.gameRunning = true;
+                    game.spawnEnemies();
+                });
             } else {
                 game.spawnEnemies();
             }
@@ -3703,6 +3719,17 @@
                         gameState.gameRunning = true;
                     });
                 }
+                // Debug: replay the win cutscene on demand while the pause menu is open
+                if ((e.key === 'v' || e.key === 'V') && gameState.paused && typeof window.playCharizardWinCutscene === 'function') {
+                    document.getElementById('pauseMenu').style.display = 'none';
+                    gameState.paused = false;
+                    gameState.cutsceneActive = true;
+                    gameState.gameRunning = false;
+                    window.playCharizardWinCutscene(() => {
+                        gameState.cutsceneActive = false;
+                        gameState.gameRunning = true;
+                    });
+                }
                 if (e.key === 'b' || e.key === 'B') {
                     jumpToLevel11();
                 }
@@ -3717,6 +3744,10 @@
                 // Debug: jump straight to level 20 to test the Kyogre final boss fight
                 if (e.key === 'm' || e.key === 'M') {
                     startGameAtLevel(20);
+                }
+                // Debug: jump straight to level 21 to test the win cutscene
+                if (e.key === 'j' || e.key === 'J') {
+                    startGameAtLevel(21);
                 }
             });
             document.addEventListener('keyup', (e) => {
@@ -3791,6 +3822,9 @@
 
         let renderer, scene, camera, mixer, clock, rangeAttackAction;
         let sceneReadyPromise = null;
+        let animationClips = [];
+        let winSequenceAction = null;
+        let winSequenceListener = null;
 
         function loadCharizardScene() {
             if (sceneReadyPromise) return sceneReadyPromise;
@@ -3829,6 +3863,7 @@
                         camera.userData.height = size.y * 0.12;
 
                         mixer = new THREE.AnimationMixer(model);
+                        animationClips = gltf.animations;
                         const clip = gltf.animations.find(a => a.name.includes('rangeattack01'))
                             || gltf.animations.find(a => a.name.includes('attack01'))
                             || gltf.animations[0];
@@ -3846,11 +3881,60 @@
             return sceneReadyPromise;
         }
 
-        window.playCharizardCutscene = async function playCharizardCutscene(onComplete) {
+        // Plays a fixed list of animation-clip indices from the loaded GLB back to back, once each
+        // (LoopOnce), advancing to the next clip on the mixer's 'finished' event. Used by the win
+        // cutscene instead of the level-11 cutscene's single looping clip.
+        function playCharizardAnimationSequence(clipIndices) {
+            stopCharizardAnimationSequence();
+            let i = 0;
+            function playNext() {
+                const clip = animationClips[clipIndices[i]];
+                if (!clip) {
+                    console.warn(`Charizard cutscene: animation index ${clipIndices[i]} not found in GLB`);
+                    i++;
+                    if (i < clipIndices.length) playNext();
+                    return;
+                }
+                winSequenceAction = mixer.clipAction(clip);
+                winSequenceAction.reset();
+                winSequenceAction.setLoop(THREE.LoopOnce, 1);
+                winSequenceAction.clampWhenFinished = true;
+                winSequenceAction.play();
+                i++;
+                if (i < clipIndices.length) {
+                    winSequenceListener = (e) => {
+                        if (e.action !== winSequenceAction) return;
+                        mixer.removeEventListener('finished', winSequenceListener);
+                        winSequenceListener = null;
+                        playNext();
+                    };
+                    mixer.addEventListener('finished', winSequenceListener);
+                }
+            }
+            playNext();
+        }
+
+        function stopCharizardAnimationSequence() {
+            if (mixer && winSequenceListener) {
+                mixer.removeEventListener('finished', winSequenceListener);
+                winSequenceListener = null;
+            }
+            if (winSequenceAction) {
+                winSequenceAction.stop();
+                winSequenceAction = null;
+            }
+        }
+
+        // Shared runner behind both window.playCharizardCutscene (level 11) and
+        // window.playCharizardWinCutscene (level 21): same overlay, same preloaded model, same
+        // reveal -> orbit -> caption camera choreography. Only the caption text and which
+        // animation(s) play underneath it differ, via setupAnimation/teardownAnimation.
+        async function runCharizardCutscene(options, onComplete) {
             const overlay = document.getElementById('charizardCutscene');
             const glow = document.getElementById('charizardGlow');
             const caption = document.getElementById('charizardCaption');
             overlay.style.display = 'block';
+            caption.textContent = options.caption;
 
             try {
                 await loadCharizardScene();
@@ -3861,7 +3945,7 @@
                 return;
             }
 
-            if (rangeAttackAction) rangeAttackAction.reset().play();
+            options.setupAnimation();
             clock.getDelta(); // discard idle time accumulated since load
 
             // Flash the glow in, then let it fade out on its own schedule (CSS-driven, decoupled from the render loop).
@@ -3917,7 +4001,7 @@
                 if (t < 1) {
                     requestAnimationFrame(animate);
                 } else {
-                    if (rangeAttackAction) rangeAttackAction.stop();
+                    options.teardownAnimation();
                     caption.style.transition = 'none';
                     caption.style.opacity = '0';
                     overlay.style.display = 'none';
@@ -3925,6 +4009,24 @@
                 }
             }
             requestAnimationFrame(animate);
+        }
+
+        window.playCharizardCutscene = function playCharizardCutscene(onComplete) {
+            return runCharizardCutscene({
+                caption: 'Congratulations! Charmander evolved into Charizard!',
+                setupAnimation: () => { if (rangeAttackAction) rangeAttackAction.reset().play(); },
+                teardownAnimation: () => { if (rangeAttackAction) rangeAttackAction.stop(); }
+            }, onComplete);
+        };
+
+        // Level-21 win cutscene: same camera choreography, but plays animation clips 30, 28, 27
+        // (in that order) once each instead of looping rangeattack01.
+        window.playCharizardWinCutscene = function playCharizardWinCutscene(onComplete) {
+            return runCharizardCutscene({
+                caption: 'Congratulations you win.',
+                setupAnimation: () => { playCharizardAnimationSequence([30, 28, 27]); },
+                teardownAnimation: () => { stopCharizardAnimationSequence(); }
+            }, onComplete);
         };
     </script>
 </body>

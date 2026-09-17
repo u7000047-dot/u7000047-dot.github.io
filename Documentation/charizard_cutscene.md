@@ -1,6 +1,15 @@
-# Level 11 Charizard Cutscene
+# Charizard Cutscenes (Level 11 & Level 21)
 
-How the pre-level-11 Charizard cutscene fits into `side_scroller_game.html`. The whole feature lives in that one file, split across three `<script>` blocks, plus the `Charizard006SV.glb` asset at the repo root.
+How the pre-level-11 and pre-level-21 Charizard cutscenes fit into `side_scroller_game.html`. The whole feature lives in that one file, split across three `<script>` blocks, plus the `Charizard006SV.glb` asset at the repo root.
+
+Both cutscenes share one runner, `runCharizardCutscene(options, onComplete)`, which owns the overlay, the preloaded model, and the reveal → orbit → caption camera choreography. `options` supplies only what differs:
+
+| | Level 11 (`window.playCharizardCutscene`) | Level 21 (`window.playCharizardWinCutscene`) |
+|---|---|---|
+| Caption | "Congratulations! Charmander evolved into Charizard!" | "Congratulations you win." |
+| Animation | `rangeattack01` clip, looped for the whole cutscene | Clips at GLB animation indices `30`, `28`, `27`, played once each in sequence (via `playCharizardAnimationSequence()`, which advances on the mixer's `finished` event) |
+
+Both are wired into the same two trigger sites (`Game.update()`'s level-clear block, and `startGameAtLevel()`), gated on `gameState.level === 11` / `=== 21` respectively, plus debug preview keys ('C' / 'V') while paused.
 
 ## Components & dependencies
 

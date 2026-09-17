@@ -1,6 +1,6 @@
 # Game Loop
 
-The main loop as it stands today: level banners, spawn queues, a house to defend, a boss every 5 levels, upgrade points, and a one-time cutscene at level 11. Collision detail is broken out separately in [activity_diagram.md](activity_diagram.md).
+The main loop as it stands today: level banners, spawn queues, a house to defend, a boss every 5 levels, upgrade points, and one-time cutscenes at levels 11 and 21. Collision detail is broken out separately in [activity_diagram.md](activity_diagram.md).
 
 ```mermaid
 flowchart TD
@@ -34,7 +34,11 @@ flowchart TD
     Is11 -- Yes --> Cutscene["gameRunning = false\ncutsceneActive = true\nplayCharizardCutscene(onComplete)"]
     Cutscene --> CutsceneDone["onComplete:\ncutsceneActive = false\ngameRunning = true\nspawnEnemies()"]
     CutsceneDone --> Draw
-    Is11 -- No --> Spawn["spawnEnemies()\n(fresh House, new spawnQueue,\nBossSlime immediately if level % 5 == 0)"]
+    Is11 -- No --> Is21{level === 21?}
+    Is21 -- Yes --> WinCutscene["gameRunning = false\ncutsceneActive = true\nplayCharizardWinCutscene(onComplete)"]
+    WinCutscene --> WinCutsceneDone["onComplete:\ncutsceneActive = false\ngameRunning = true\nspawnEnemies()"]
+    WinCutsceneDone --> Draw
+    Is21 -- No --> Spawn["spawnEnemies()\n(fresh House, new spawnQueue,\nBossSlime immediately if level % 5 == 0)"]
     Spawn --> Draw
 
     %% --- Menus (interrupt the loop via gameRunning, not the flow above) ---
@@ -47,6 +51,7 @@ flowchart TD
     Spend --> CloseStats["closeStatsMenu()\nstatsOpen = false\ngameRunning = true (if not paused)"]
 
     DebugC(["'C' key\n(while paused)"]) --> DebugCutscene["Close pause menu\nplayCharizardCutscene(...)\n(preview only — does not touch level/spawns)"]
+    DebugV(["'V' key\n(while paused)"]) --> DebugWinCutscene["Close pause menu\nplayCharizardWinCutscene(...)\n(preview only — does not touch level/spawns)"]
 
     PauseMenu2["Pause menu also offers:\nReset Game · Export State (JSON) · Import State (JSON)"]
 ```

@@ -18,6 +18,7 @@ How difficulty and rewards scale as `gameState.level` climbs. There is no final 
 | **5 levels** (`level % 5 == 0`) | A `BossSlime` (500 HP) spawns immediately, walking in from off-screen left. Also grants `level / 5` upgrade points. |
 | **10 levels** (`level % 10 == 0`) | `maxLives += 1`, and `lives` refills to the new max. |
 | **Level 11** (one-time) | Before that level's enemies spawn, the game pauses and plays the Charizard evolution cutscene — see [charizard_cutscene.md](charizard_cutscene.md). Enemies for level 11 spawn only after the cutscene finishes. |
+| **Level 21** (one-time) | Before that level's enemies spawn, the game pauses and plays the Charizard win cutscene (same camera choreography as level 11, but Charizard plays animation clips 30 → 28 → 27 once each instead of looping, under the caption "Congratulations you win.") — see [charizard_cutscene.md](charizard_cutscene.md). Enemies for level 21 spawn only after the cutscene finishes. |
 
 ## BossSlime detail
 
