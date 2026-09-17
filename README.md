@@ -8,5 +8,5 @@ Road map:
 6.earn special bounty after defeating a boss.
 7.boss becomes harder and higher hp every level
 8.make a katana it reflects bullets
-
+squirtle kyogre
 

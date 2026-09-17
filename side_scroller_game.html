@@ -427,6 +427,7 @@
         }
         function getBiome(level) {
             // Special maps only show up on boss levels; every other level uses the default map.
+            if (level === 20) return 'ocean';
             if (level === 15) return 'galaxy';
             if (level === 10) return 'polluted';
             if (level % 5 === 0) return 'swamp';
@@ -462,6 +463,21 @@
             x,
             r: 10 + (i % 5) * 6
         }));
+        // Ocean backdrop for the Kyogre fight — the house sits on a sandy island; everything
+        // outside OCEAN_ISLAND_CENTER +/- OCEAN_ISLAND_HALF_WIDTH is open water.
+        const OCEAN_ISLAND_CENTER = WORLD_WIDTH / 2;
+        const OCEAN_ISLAND_HALF_WIDTH = 260;
+        const OCEAN_WAVE_LINES = seededPositions(51, 60, WORLD_WIDTH).map((x, i) => ({
+            x,
+            yOff: 10 + (i % 6) * 12,
+            len: 26 + (i % 4) * 14,
+            phase: (i * 0.75) % (Math.PI * 2)
+        }));
+        const OCEAN_CLOUDS = seededPositions(19, 5, WORLD_WIDTH).map((x, i) => ({
+            x,
+            y: 40 + (i % 3) * 30,
+            scale: 0.8 + (i % 3) * 0.3
+        }));
         // Game State
         const gameState = {
             score: 0,
@@ -491,6 +507,7 @@
             katanaCooldownTimer: 0, // frames remaining before the katana can be equipped again; 0 = ready
             katanaMeleeSwingTimer: 0, // frames remaining in the current melee swing's visual animation
             katanaMeleeFacing: 1, // facing direction the last melee swing was thrown in, for drawing
+            waterBounceCooldown: 0, // frames of grace after bouncing off the ocean level's water, so holding into it doesn't drain lives every frame
             gasDebuffTimer: 0, // >0 while the player can't shoot / has tunnel vision from touching Weezing's gas
             level: 1,
             levelBannerTimer: 0,
@@ -565,6 +582,10 @@
                 this.isJumping = false;
                 this.gravity = 0.5;
                 this.jumpPower = -15;
+                this.flapPower = -7.5; // upward kick from a mid-air wing flap — weaker than takeoff
+                this.prevSpaceHeld = false; // tracks the previous tick's space state so each flap needs a fresh press
+                this.flapAnimTimer = 0;
+                this.flapAnimDuration = 12;
                 this.direction = Direction.IDLE;
                 
                 // Load the sprite asset once and switch it at level 11.
@@ -597,17 +618,27 @@
                     this.velocityX = effectiveSpeed;
                     this.direction = Direction.RIGHT;
                 }
-                if ((keys[' '] || keys['Space']) && !this.isJumping) {
-                    this.isJumping = true;
-                    this.velocityY = this.jumpPower;
+                // Space only acts on a fresh press, not while held — Charizard doesn't glide on
+                // a held key, it has to actually flap: the first press off the ground is the
+                // takeoff leap, and every following press while airborne is a wing-beat that
+                // kicks velocity back upward against gravity. Stop pressing and gravity wins.
+                const spaceHeld = Boolean(keys[' '] || keys['Space']);
+                const spaceJustPressed = spaceHeld && !this.prevSpaceHeld;
+                if (spaceJustPressed) {
+                    if (!this.isJumping) {
+                        this.isJumping = true;
+                        this.velocityY = this.jumpPower;
+                    } else if (gameState.level >= 11) {
+                        // Only Charizard (level 11+) can flap mid-air; Charmander just has a plain jump.
+                        this.velocityY = this.flapPower;
+                        this.flapAnimTimer = this.flapAnimDuration;
+                    }
                 }
+                this.prevSpaceHeld = spaceHeld;
             }
             applyGravity() {
                 const groundY = SCREEN_HEIGHT - GROUND_HEIGHT - this.height;
-                
-                // Always apply gravity
                 this.velocityY += this.gravity;
-                
                 // Check if on ground (only reset if moving downward)
                 if (this.y >= groundY && this.velocityY >= 0) {
                     this.y = groundY;
@@ -620,6 +651,7 @@
                 this.applyGravity();
                 this.x += this.velocityX;
                 this.y += this.velocityY;
+                if (this.flapAnimTimer > 0) this.flapAnimTimer--;
                 // Keep on screen
                 if (this.x < 0) this.x = 0;
                 if (this.x + this.width > WORLD_WIDTH) this.x = WORLD_WIDTH - this.width;
@@ -637,6 +669,13 @@
                     drawX = this.x + (this.width - drawWidth) / 2;
                     drawY = this.y + (this.height - drawHeight) / 2;
                 }
+                // Wing-flap feedback: each fresh space press gives a brief upward "hop" to the
+                // drawn sprite (purely cosmetic — physics already moved this frame) plus a pair
+                // of wind-streak arcs, both fading out over flapAnimDuration frames.
+                const flapT = this.flapAnimTimer > 0 ? this.flapAnimTimer / this.flapAnimDuration : 0;
+                const flapLift = flapT * 6;
+                drawY -= flapLift;
+
                 const facing = this.direction === Direction.LEFT ? -1 : 1;
                 const meleeSwinging = gameState.katanaMeleeSwingTimer > 0;
                 const katanaEquipped = gameState.level >= 16 && (gameState.katanaDeflectActive || meleeSwinging);
@@ -667,6 +706,7 @@
                     ctx.fillStyle = COLORS.RED;
                     ctx.fillRect(this.x, this.y, this.width, this.height);
                 }
+                this.drawWingFlapEffect(ctx, drawX + drawWidth / 2, drawY + drawHeight * 0.32, flapT);
 
                 // Equipped katana — drawn last (on top of the sprite) and out in front of the
                 // body in the direction Charizard is facing, like it's gripped and held ready,
@@ -698,6 +738,25 @@
                     drawKatana(ctx, 0, 0, angle);
                     ctx.restore();
                 }
+            }
+            // A pair of wind-streak arcs flaring outward from the shoulders on each wing flap,
+            // expanding and fading out over flapAnimDuration frames.
+            drawWingFlapEffect(ctx, cx, cy, t) {
+                if (t <= 0) return;
+                ctx.save();
+                ctx.globalAlpha = t * 0.7;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 3;
+                ctx.lineCap = 'round';
+                const spread = 16 + (1 - t) * 30;
+                const drop = (1 - t) * 16;
+                ctx.beginPath();
+                ctx.moveTo(cx - 12, cy - 4 + drop);
+                ctx.quadraticCurveTo(cx - spread, cy - 14 + drop, cx - spread - 16, cy + drop);
+                ctx.moveTo(cx + 12, cy - 4 + drop);
+                ctx.quadraticCurveTo(cx + spread, cy - 14 + drop, cx + spread + 16, cy + drop);
+                ctx.stroke();
+                ctx.restore();
             }
             getCollisionBox() {
                 return {
@@ -783,7 +842,7 @@
         }
         // EnemyFireball class
         class EnemyFireball {
-            constructor(x, y, vx, vy, owner = null) {
+            constructor(x, y, vx, vy, owner = null, color = null) {
                 this.x = x;
                 this.y = y;
                 this.radius = 10;
@@ -791,6 +850,7 @@
                 this.vy = vy;
                 this.active = true;
                 this.owner = owner; // the Enemy that fired this — used to aim a katana deflection back at it
+                this.color = color || COLORS.RED;
             }
             update() {
                 this.x += this.vx;
@@ -803,7 +863,7 @@
                 ctx.save();
                 ctx.beginPath();
                 ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-                ctx.fillStyle = COLORS.RED;
+                ctx.fillStyle = this.color;
                 ctx.shadowColor = COLORS.BLACK;
                 ctx.shadowBlur = 10;
                 ctx.fill();
@@ -1979,6 +2039,164 @@
                 return { x: this.x, y: this.y, width: this.width, height: this.height };
             }
         }
+        // KyogreBoss — level 20 final boss. A sea legend that swims the water surrounding the
+        // house-island, rolling up and down like a wave. Patrols two water zones (one on each
+        // side of the island, never crossing the land) and periodically dives out of one zone
+        // to resurface in the other. Immune to fireballs and drone bombs — the katana's melee
+        // swing is the only thing that can hurt it.
+        class KyogreBoss {
+            constructor() {
+                this.width = 260;
+                this.height = 150;
+                this.baseY = SCREEN_HEIGHT - GROUND_HEIGHT - this.height * 0.4; // mostly submerged
+                const islandLeft = OCEAN_ISLAND_CENTER - OCEAN_ISLAND_HALF_WIDTH;
+                const islandRight = OCEAN_ISLAND_CENTER + OCEAN_ISLAND_HALF_WIDTH;
+                this.zones = [
+                    { min: 30, max: Math.max(30, islandLeft - this.width - 30) },
+                    { min: Math.min(WORLD_WIDTH - this.width - 30, islandRight + 30), max: WORLD_WIDTH - this.width - 30 }
+                ];
+                this.zoneIndex = 0;
+                this.x = this.zones[0].min;
+                this.y = this.baseY;
+                this.patrolDir = 1;
+                this.patrolSpeed = 0.7;
+                this.bobPhase = Math.random() * Math.PI * 2;
+                this.bobSpeed = 0.028;
+                this.bobAmplitude = 46;
+                this.maxHealth = 1000;
+                this.health = 1000;
+                this.attackCooldown = 220;
+                this.diveState = 'swimming'; // 'swimming' -> 'diving' -> 'surfacing' -> 'swimming'
+                this.diveTimer = 480 + Math.floor(Math.random() * 200);
+                this.alpha = 1;
+                this.rageTriggered = false;
+                this.rageMode = false;
+                this.image = new Image();
+                this.image.src = 'kyogre.png';
+            }
+            update() {
+                if (this.health <= 0) return; // frozen once defeated
+                this.bobPhase += this.bobSpeed * (this.rageMode ? 1.4 : 1);
+                const bob = Math.sin(this.bobPhase) * this.bobAmplitude;
+
+                if (this.diveState === 'swimming') {
+                    this.y = this.baseY + bob;
+                    const zone = this.zones[this.zoneIndex];
+                    this.x += this.patrolSpeed * this.patrolDir * (this.rageMode ? 1.6 : 1);
+                    if (this.x < zone.min) { this.x = zone.min; this.patrolDir = 1; }
+                    if (this.x > zone.max) { this.x = zone.max; this.patrolDir = -1; }
+
+                    this.diveTimer--;
+                    if (this.diveTimer <= 0) {
+                        this.diveState = 'diving';
+                        this.diveTimer = 25;
+                    }
+                    this.attackCooldown--;
+                    if (this.attackCooldown <= 0) {
+                        this.shootTidalBolt();
+                        this.attackCooldown = (this.rageMode ? 130 : 210) + Math.floor(Math.random() * 100);
+                    }
+                } else if (this.diveState === 'diving') {
+                    this.alpha = Math.max(0, this.alpha - 1 / 25);
+                    this.y = this.baseY + bob + (1 - this.alpha) * 60;
+                    this.diveTimer--;
+                    if (this.diveTimer <= 0) {
+                        this.zoneIndex = 1 - this.zoneIndex;
+                        const z = this.zones[this.zoneIndex];
+                        this.x = z.min + Math.random() * Math.max(1, z.max - z.min);
+                        this.patrolDir = 1;
+                        this.diveState = 'surfacing';
+                        this.diveTimer = 25;
+                    }
+                } else { // surfacing
+                    this.alpha = Math.min(1, this.alpha + 1 / 25);
+                    this.y = this.baseY + bob + (1 - this.alpha) * 60;
+                    this.diveTimer--;
+                    if (this.diveTimer <= 0) {
+                        this.diveState = 'swimming';
+                        this.diveTimer = 480 + Math.floor(Math.random() * 200);
+                    }
+                }
+
+                if (this.health <= this.maxHealth * 0.35 && !this.rageTriggered) {
+                    this.rageTriggered = true;
+                    this.rageMode = true;
+                    gameState.bossRageFlash = 90;
+                }
+            }
+            shootTidalBolt() {
+                const player = window.game.gameInstance.player;
+                const startX = this.x + this.width / 2;
+                const startY = this.y + this.height * 0.35;
+                const dx = player.x + player.width / 2 - startX;
+                const dy = player.y + player.height / 2 - startY;
+                const mag = Math.sqrt(dx * dx + dy * dy) || 1;
+                const speed = 7;
+                gameState.enemyFireballs.push(new EnemyFireball(startX, startY, (dx / mag) * speed, (dy / mag) * speed, this, '#2ec4ff'));
+            }
+            draw(ctx) {
+                if (this.diveState !== 'swimming' && this.alpha <= 0.02) {
+                    // Fully submerged between zones — just a faint ripple, no body or health bar.
+                    ctx.save();
+                    ctx.globalAlpha = 0.3;
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.ellipse(this.x + this.width / 2, SCREEN_HEIGHT - GROUND_HEIGHT + 10, 70, 14, 0, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+                    return;
+                }
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                if (this.rageMode) { ctx.shadowColor = '#ff5500'; ctx.shadowBlur = 26; }
+                if (this.image.complete && this.image.naturalWidth > 0) {
+                    if (this.patrolDir > 0) {
+                        ctx.translate(this.x + this.width, this.y);
+                        ctx.scale(-1, 1);
+                        ctx.drawImage(this.image, 0, 0, this.width, this.height);
+                    } else {
+                        ctx.drawImage(this.image, this.x, this.y, this.width, this.height);
+                    }
+                } else {
+                    ctx.fillStyle = '#2b6ca3';
+                    ctx.fillRect(this.x, this.y, this.width, this.height);
+                }
+                ctx.restore();
+                // Wake ripple at the waterline beneath it
+                ctx.save();
+                ctx.globalAlpha = 0.35 * this.alpha;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.ellipse(this.x + this.width / 2, SCREEN_HEIGHT - GROUND_HEIGHT + 6, this.width * 0.42, 10, 0, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+                // Health bar + immunity reminder
+                const barW = this.width + 30;
+                const barX = this.x + this.width / 2 - barW / 2;
+                const barY = this.y - 26;
+                const hp = Math.max(0, this.health) / this.maxHealth;
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.fillStyle = '#222'; ctx.fillRect(barX, barY, barW, 14);
+                ctx.fillStyle = hp > 0.4 ? '#00cc00' : hp > 0.2 ? '#ddcc00' : '#dd2200';
+                ctx.fillRect(barX, barY, barW * hp, 14);
+                ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5; ctx.strokeRect(barX, barY, barW, 14);
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+                ctx.fillText('KYOGRE HP: ' + Math.max(0, this.health), barX + barW / 2, barY - 5);
+                ctx.fillStyle = '#8fe3ff'; ctx.font = 'bold 11px Arial';
+                ctx.fillText('IMMUNE TO FIREBALLS/DRONES — USE THE KATANA', barX + barW / 2, barY - 20);
+                if (this.rageMode) {
+                    ctx.fillStyle = '#ff4400'; ctx.font = 'bold 13px Arial';
+                    ctx.fillText('!! ENRAGED !!', barX + barW / 2, barY - 34);
+                }
+                ctx.restore();
+            }
+            getCollisionBox() {
+                return { x: this.x, y: this.y, width: this.width, height: this.height };
+            }
+        }
         // Explosion visual effect used when chaser hits the house
         class Explosion {
             constructor(x, y, opts = {}) {
@@ -1988,7 +2206,7 @@
                 this.duration = opts.duration || 70;
                 this.particles = [];
                 const count = opts.count || 36;
-                const colors = ['#ff9f1c', '#ff3c00', '#ffd166', '#ff6b6b'];
+                const colors = opts.colors || ['#ff9f1c', '#ff3c00', '#ffd166', '#ff6b6b'];
                 for (let i = 0; i < count; i++) {
                     const angle = Math.random() * Math.PI * 2;
                     const speed = 2 + Math.random() * 6;
@@ -2129,12 +2347,14 @@
                 }
 
                 // Boss slime walks in from off-screen left — spawn immediately.
-                // Level 10 gets the flying WeezingBoss, level 15 gets RayquazaBoss; other boss
-                // levels keep the ground slime.
+                // Level 10 gets the flying WeezingBoss, level 15 gets RayquazaBoss, level 20 gets
+                // the final boss KyogreBoss; other boss levels keep the ground slime.
                 if (gameState.level === 10) {
                     this.enemies.push(new WeezingBoss());
                 } else if (gameState.level === 15) {
                     this.enemies.push(new RayquazaBoss());
+                } else if (gameState.level === 20) {
+                    this.enemies.push(new KyogreBoss());
                 } else if (gameState.level % 5 === 0) {
                     this.enemies.push(new BossSlime());
                 }
@@ -2193,6 +2413,40 @@
                     gameState.katanaActiveTimer = 0;
                 }
             }
+            // Ocean level (20): the island is the only walkable ground, but Charizard can fly —
+            // jumping and gliding (hold space) out over the water is fine while airborne. Only
+            // touching down outside the island (walking off the edge, or a glide that comes down
+            // over open water) bounces the player back and costs a life, with a brief grace window
+            // afterward so holding the movement key into the water doesn't chain-drain lives.
+            enforceWaterBounds() {
+                if (gameState.waterBounceCooldown > 0) gameState.waterBounceCooldown--;
+                if (getBiome(gameState.level) !== 'ocean') return;
+                const player = this.player;
+                if (player.isJumping) return; // airborne (jumping or gliding) — safe over water
+                const islandLeft = OCEAN_ISLAND_CENTER - OCEAN_ISLAND_HALF_WIDTH;
+                const islandRight = OCEAN_ISLAND_CENTER + OCEAN_ISLAND_HALF_WIDTH;
+                const hitLeftWater = player.x < islandLeft;
+                const hitRightWater = player.x + player.width > islandRight;
+                if (!hitLeftWater && !hitRightWater) return;
+
+                if (gameState.waterBounceCooldown <= 0) {
+                    const splashX = hitLeftWater ? islandLeft : islandRight;
+                    gameState.explosions.push(new Explosion(splashX, SCREEN_HEIGHT - GROUND_HEIGHT + 8, {
+                        count: 24, duration: 40, colors: ['#bdeeff', '#4fb8e8', '#ffffff', '#2b8fc4']
+                    }));
+                    gameState.lives--;
+                    gameState.waterBounceCooldown = 60;
+                    if (gameState.lives <= 0) {
+                        revertToCheckpoint();
+                        return; // revertToCheckpoint rebuilds the player — nothing left to clamp
+                    }
+                }
+                // Bounce back onto the island regardless of cooldown, so the player is never left
+                // standing in the water.
+                const bounceMargin = 30;
+                player.x = hitLeftWater ? islandLeft + bounceMargin : islandRight - player.width - bounceMargin;
+                player.x = Math.max(islandLeft, Math.min(player.x, islandRight - player.width));
+            }
             // A quick right-click tap (as opposed to holding, which deflects) swings the katana
             // as a melee weapon: an instant hit-check in a short reach in front of the player,
             // using the same damage stat and boss multiplier as fireballs.
@@ -2209,7 +2463,7 @@
                 for (let i = this.enemies.length - 1; i >= 0; i--) {
                     const enemy = this.enemies[i];
                     if (!checkCollision(box, enemy.getCollisionBox())) continue;
-                    const hitDmg = (enemy instanceof BossSlime || enemy instanceof WeezingBoss || enemy instanceof RayquazaBoss) ? 10 * gameState.stats.damage : gameState.stats.damage;
+                    const hitDmg = (enemy instanceof BossSlime || enemy instanceof WeezingBoss || enemy instanceof RayquazaBoss || enemy instanceof KyogreBoss) ? 10 * gameState.stats.damage : gameState.stats.damage;
                     enemy.health = (enemy.health || enemy.maxHealth || 2) - hitDmg;
                     if (enemy.health <= 0) this.killEnemy(this.enemies, i);
                 }
@@ -2227,10 +2481,13 @@
                     }
                     return;
                 }
-                const pts = (enemy instanceof BossSlime || enemy instanceof WeezingBoss) ? 500 : 50;
+                const pts = enemy instanceof KyogreBoss ? 1500 : (enemy instanceof BossSlime || enemy instanceof WeezingBoss) ? 500 : 50;
                 list.splice(idx, 1);
                 gameState.money += pts;
                 gameState.score = gameState.money;
+                if (enemy instanceof KyogreBoss) {
+                    gameState.explosions.push(new Explosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, { count: 90, duration: 130 }));
+                }
             }
             startRayquazaSlayCutscene(enemy) {
                 gameState.gasDebuffTimer = 0;
@@ -2353,6 +2610,7 @@
                 }
                 this.player.update(gameState.keys);
                 this.updateKatanaAbility();
+                this.enforceWaterBounds();
                 if (this.repairman) this.repairman.update();
                 // Spread drones across different enemies, but once every enemy already has a drone
                 // (e.g. only one is left), let the rest pile onto the nearest remaining target
@@ -2428,6 +2686,7 @@
                         gameState.explosions.push(new Explosion(impactX, impactY, { count: 30, duration: 55 }));
                         for (let j = this.enemies.length - 1; j >= 0; j--) {
                             const enemy = this.enemies[j];
+                            if (enemy instanceof KyogreBoss) continue; // immune to bombs (drone or otherwise)
                             const ex = enemy.x + enemy.width / 2;
                             const ey = enemy.y + enemy.height / 2;
                             if (Math.hypot(ex - impactX, ey - impactY) <= bomb.blastRadius) {
@@ -2508,14 +2767,19 @@
                         }
                     }
                 }
-                // Fireball-enemy collision
+                // Fireball-enemy collision. Kyogre is immune to fireballs — they splash off
+                // harmlessly (blocked, no damage) instead of hurting it.
                 for (let fireball of gameState.fireballs) {
                     for (let i = this.enemies.length - 1; i >= 0; i--) {
                         const enemy = this.enemies[i];
                         if (checkCollision(fireball.getCollisionBox(), enemy.getCollisionBox())) {
+                            fireball.active = false;
+                            if (enemy instanceof KyogreBoss) {
+                                gameState.explosions.push(new Explosion(fireball.x, fireball.y, { count: 10, duration: 18 }));
+                                continue;
+                            }
                             const hitDmg = (enemy instanceof BossSlime || enemy instanceof WeezingBoss || enemy instanceof RayquazaBoss) ? 10 * gameState.stats.damage : gameState.stats.damage;
                             enemy.health = (enemy.health || enemy.maxHealth || 2) - hitDmg;
-                            fireball.active = false;
                             // if enemy dead, remove and award score
                             if (enemy.health <= 0) {
                                 this.killEnemy(this.enemies, i);
@@ -2703,6 +2967,68 @@
                 ctx.fill();
                 ctx.restore();
             }
+            drawSeaCloud(x, y, scale) {
+                const ctx = this.ctx;
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.scale(scale, scale);
+                ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                ctx.beginPath();
+                ctx.ellipse(0, 0, 50, 18, 0, 0, Math.PI * 2);
+                ctx.ellipse(38, 4, 36, 15, 0, 0, Math.PI * 2);
+                ctx.ellipse(-34, 6, 30, 13, 0, 0, Math.PI * 2);
+                ctx.ellipse(10, -12, 26, 16, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+            // Water surrounding a sandy island the house sits on — waves ripple everywhere except
+            // the island footprint, with a foam shoreline where the two meet.
+            drawOceanAndIsland() {
+                const ctx = this.ctx;
+                const groundTop = SCREEN_HEIGHT - GROUND_HEIGHT;
+                const islandLeft = OCEAN_ISLAND_CENTER - OCEAN_ISLAND_HALF_WIDTH;
+                const islandRight = OCEAN_ISLAND_CENTER + OCEAN_ISLAND_HALF_WIDTH;
+
+                // Animated wave ripples across the open water (skip anywhere under the island)
+                ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+                ctx.lineWidth = 2;
+                for (const w of OCEAN_WAVE_LINES) {
+                    if (w.x > islandLeft - 20 && w.x < islandRight + 20) continue;
+                    const yy = groundTop + w.yOff + Math.sin(this.frameCount * 0.05 + w.phase) * 4;
+                    ctx.beginPath();
+                    ctx.moveTo(w.x, yy);
+                    ctx.quadraticCurveTo(w.x + w.len / 2, yy - 4, w.x + w.len, yy);
+                    ctx.stroke();
+                }
+
+                // Sandy island mound, topped with grass, centered on the house
+                const islandWidth = islandRight - islandLeft;
+                ctx.fillStyle = '#e3cd8f';
+                ctx.beginPath();
+                ctx.ellipse(OCEAN_ISLAND_CENTER, groundTop, islandWidth / 2, 26, 0, Math.PI, Math.PI * 2);
+                ctx.closePath();
+                ctx.fill();
+                ctx.fillRect(islandLeft, groundTop, islandWidth, GROUND_HEIGHT);
+                ctx.fillStyle = '#4e8f3a';
+                ctx.beginPath();
+                ctx.ellipse(OCEAN_ISLAND_CENTER, groundTop + 3, islandWidth / 2 - 22, 16, 0, Math.PI, Math.PI * 2);
+                ctx.closePath();
+                ctx.fill();
+
+                // Foam shoreline bobbing along both edges of the island
+                ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+                ctx.lineWidth = 3;
+                for (let i = 0; i < 7; i++) {
+                    const fy = groundTop + 14 + i * 12;
+                    const jitter = Math.sin(this.frameCount * 0.07 + i * 0.9) * 4;
+                    ctx.beginPath();
+                    ctx.arc(islandLeft - 4 + jitter, fy, 5, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.arc(islandRight + 4 - jitter, fy, 5, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            }
             drawPollutedCloud(x, y) {
                 const ctx = this.ctx;
                 ctx.save();
@@ -2745,7 +3071,7 @@
             draw() {
                 const biome = getBiome(gameState.level);
                 // Clear screen
-                this.ctx.fillStyle = biome === 'polluted' ? '#8a8a76' : (biome === 'swamp' ? '#7a8f7a' : (biome === 'galaxy' ? '#0b0518' : COLORS.LIGHT_BLUE));
+                this.ctx.fillStyle = biome === 'polluted' ? '#8a8a76' : (biome === 'swamp' ? '#7a8f7a' : (biome === 'galaxy' ? '#0b0518' : (biome === 'ocean' ? '#8ed8f0' : COLORS.LIGHT_BLUE)));
                 this.ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
                 // Apply camera offset for all world elements
@@ -2765,6 +3091,11 @@
                     skyGrad.addColorStop(0, '#04020a');
                     skyGrad.addColorStop(1, '#241638');
                     this.ctx.fillStyle = skyGrad;
+                } else if (biome === 'ocean') {
+                    const skyGrad = this.ctx.createLinearGradient(0, 0, 0, SCREEN_HEIGHT - GROUND_HEIGHT);
+                    skyGrad.addColorStop(0, '#3fa9e0');
+                    skyGrad.addColorStop(1, '#bdeeff');
+                    this.ctx.fillStyle = skyGrad;
                 } else {
                     this.ctx.fillStyle = COLORS.LIGHT_BLUE;
                 }
@@ -2778,8 +3109,20 @@
                     for (const n of GALAXY_NEBULAE) this.drawNebula(n.x, n.y, n.scale, n.hue);
                     for (const s of GALAXY_STARS) this.drawStar(s);
                 }
+                // Ocean sun glow + fluffy clouds
+                if (biome === 'ocean') {
+                    const sunX = OCEAN_ISLAND_CENTER - 260, sunY = 90;
+                    const sunGlow = this.ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 140);
+                    sunGlow.addColorStop(0, 'rgba(255,250,210,0.85)');
+                    sunGlow.addColorStop(1, 'rgba(255,250,210,0)');
+                    this.ctx.fillStyle = sunGlow;
+                    this.ctx.beginPath();
+                    this.ctx.arc(sunX, sunY, 140, 0, Math.PI * 2);
+                    this.ctx.fill();
+                    for (const c of OCEAN_CLOUDS) this.drawSeaCloud(c.x, c.y, c.scale);
+                }
                 // Draw ground
-                this.ctx.fillStyle = biome === 'swamp' ? '#4e5c3a' : (biome === 'galaxy' ? '#231a35' : COLORS.GREEN);
+                this.ctx.fillStyle = biome === 'swamp' ? '#4e5c3a' : (biome === 'galaxy' ? '#231a35' : (biome === 'ocean' ? '#1c7fb0' : COLORS.GREEN));
                 this.ctx.fillRect(0, SCREEN_HEIGHT - GROUND_HEIGHT, WORLD_WIDTH, GROUND_HEIGHT);
                 if (biome === 'swamp') {
                     // Muddy ground texture
@@ -2818,6 +3161,8 @@
                         this.ctx.stroke();
                         this.ctx.restore();
                     }
+                } else if (biome === 'ocean') {
+                    this.drawOceanAndIsland();
                 } else {
                     // Draw grass pattern
                     this.ctx.strokeStyle = COLORS.DARK_GREEN;
@@ -2995,6 +3340,7 @@
             gameState.katanaActiveTimer = 0;
             gameState.katanaCooldownTimer = 0;
             gameState.katanaMeleeSwingTimer = 0;
+            gameState.waterBounceCooldown = 0;
             gameState.showLevelBanner = true;
             gameState.levelBannerTimer = 0;
             gameState.paused = false;
@@ -3083,6 +3429,7 @@
             gameState.katanaActiveTimer = 0;
             gameState.katanaCooldownTimer = 0;
             gameState.katanaMeleeSwingTimer = 0;
+            gameState.waterBounceCooldown = 0;
             gameState.showLevelBanner = true;
             gameState.levelBannerTimer = 0;
             const game = window.game.gameInstance;
@@ -3168,6 +3515,7 @@
                     gameState.katanaActiveTimer = 0;
                     gameState.katanaCooldownTimer = 0;
                     gameState.katanaMeleeSwingTimer = 0;
+                    gameState.waterBounceCooldown = 0;
                     gameState.showLevelBanner = true;
                     gameState.levelBannerTimer = 0;
                     gameState.paused = false;
@@ -3365,6 +3713,10 @@
                 // Debug: jump straight to level 16 to test the katana/deflect mechanic
                 if (e.key === 'n' || e.key === 'N') {
                     startGameAtLevel(16);
+                }
+                // Debug: jump straight to level 20 to test the Kyogre final boss fight
+                if (e.key === 'm' || e.key === 'M') {
+                    startGameAtLevel(20);
                 }
             });
             document.addEventListener('keyup', (e) => {
