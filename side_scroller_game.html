@@ -183,6 +183,90 @@
             white-space: nowrap;
         }
         #shopBtn:hover { background: rgba(20, 60, 30, 0.95); }
+        #leaderboardBtn {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(110px);
+            background: rgba(50, 35, 10, 0.88);
+            color: #ffbf70;
+            border: 2px solid #ffbf70;
+            padding: 6px 18px;
+            font-size: 15px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: Arial, sans-serif;
+            z-index: 10;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+        #leaderboardBtn:hover { background: rgba(70, 50, 15, 0.95); }
+        #leaderboardMenu {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(10, 10, 30, 0.97);
+            color: white;
+            padding: 36px 44px;
+            border-radius: 12px;
+            text-align: center;
+            display: none;
+            z-index: 210;
+            min-width: 380px;
+            max-width: 90vw;
+            border: 2px solid #ffbf70;
+            box-shadow: 0 0 40px rgba(255, 191, 112, 0.25);
+        }
+        #leaderboardMenu h2 { font-size: 26px; margin-bottom: 18px; color: #ffbf70; }
+        #leaderboardList {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+        }
+        #leaderboardList .lb-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 7px 4px;
+            font-size: 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        #leaderboardList .lb-rank { width: 32px; color: #ffbf70; font-weight: bold; text-align: left; }
+        #leaderboardList .lb-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #leaderboardList .lb-level { width: 56px; color: #7ec8e3; }
+        #leaderboardList .lb-score { width: 72px; text-align: right; color: #ffd700; font-weight: bold; }
+        #leaderboardList .lb-status { padding: 18px 0; color: #aaa; font-size: 14px; }
+        #leaderboardMenu .lb-submit-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        #leaderboardMenu .lb-submit-row input {
+            flex: 1;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid #555;
+            background: #1a1a2e;
+            color: white;
+            font-size: 14px;
+            font-family: Arial, sans-serif;
+        }
+        #leaderboardMenu .lb-submit-row button {
+            background: #27ae60; color: white; border: none;
+            padding: 8px 16px; border-radius: 6px; cursor: pointer;
+            font-size: 14px; font-weight: bold; transition: background 0.2s; white-space: nowrap;
+        }
+        #leaderboardMenu .lb-submit-row button:hover:not(:disabled) { background: #1e8449; }
+        #leaderboardMenu .lb-submit-row button:disabled { background: #444; color: #888; cursor: default; }
+        #leaderboardSubmitStatus { font-size: 12px; color: #aaa; margin: -10px 0 16px; min-height: 14px; }
+        #leaderboardMenu .close-btn {
+            background: #667eea; color: white; border: none;
+            padding: 10px 34px; border-radius: 6px; cursor: pointer;
+            font-size: 15px; font-weight: bold; transition: background 0.2s;
+        }
+        #leaderboardMenu .close-btn:hover { background: #764ba2; }
         #statsBadge {
             display: none;
             background: #ff4422;
@@ -380,6 +464,7 @@
         <div id="score" class="info">Money: <span id="scoreValue">0</span></div>
         <button id="statsBtn" onclick="showStatsMenu()">Stats <span id="statsBadge">0</span></button>
         <button id="shopBtn" onclick="showShopMenu()">Shop</button>
+        <button id="leaderboardBtn" onclick="showLeaderboard()">&#127942; Leaderboard</button>
         <div id="controls" class="info">A/D: Move | Space: Jump | Left Click: Shoot | ESC: Menu</div>        <div id="version" class="info">v1.0</div>        <div id="shopMenu">
             <h2>&#128736; Shop</h2>
             <div class="stat-row">
@@ -418,6 +503,16 @@
                 <button class="upg-btn" onclick="upgradeStat('speed')">+1 &nbsp;(1pt)</button>
             </div>
             <button class="close-btn" onclick="closeStatsMenu()">Close</button>
+        </div>
+        <div id="leaderboardMenu">
+            <h2>&#127942; Leaderboard</h2>
+            <div class="lb-submit-row">
+                <input type="text" id="leaderboardNameInput" maxlength="20" placeholder="Your name">
+                <button id="leaderboardSubmitBtn" onclick="submitLeaderboardEntry()">Submit Score</button>
+            </div>
+            <div id="leaderboardSubmitStatus"></div>
+            <div id="leaderboardList"><div class="lb-status">Loading&hellip;</div></div>
+            <button class="close-btn" onclick="closeLeaderboardMenu()">Close</button>
         </div>
         <div id="gameOver">
             <h1>Game Over!</h1>
@@ -530,6 +625,7 @@
             paused: false,
             statsOpen: false,
             shopOpen: false,
+            leaderboardOpen: false,
             cutsceneActive: false,
             keys: {},
             shop: { autoRepair: false, autoRepairLevel: 0, autoRepairCost: 100, drone: false, droneLevel: 0, droneCost: 200 },
@@ -3645,6 +3741,74 @@
             gameState.statsOpen = false;
             if (!gameState.paused) gameState.gameRunning = true;
         }
+        // --- Leaderboard (Firebase-backed; see the Firebase module script for the config spot) ---
+        let leaderboardSubmitting = false;
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+        function showLeaderboard() {
+            gameState.leaderboardOpen = true;
+            if (!gameState.paused) gameState.gameRunning = false;
+            document.getElementById('leaderboardMenu').style.display = 'block';
+            document.getElementById('leaderboardSubmitStatus').textContent = '';
+            try {
+                const savedName = localStorage.getItem('leaderboardName');
+                if (savedName) document.getElementById('leaderboardNameInput').value = savedName;
+            } catch (e) { /* localStorage unavailable (private browsing, etc.) — just skip the prefill */ }
+            refreshLeaderboardDisplay();
+        }
+        function closeLeaderboardMenu() {
+            document.getElementById('leaderboardMenu').style.display = 'none';
+            gameState.leaderboardOpen = false;
+            if (!gameState.paused) gameState.gameRunning = true;
+        }
+        async function refreshLeaderboardDisplay() {
+            const list = document.getElementById('leaderboardList');
+            list.innerHTML = '<div class="lb-status">Loading&hellip;</div>';
+            if (!window.__leaderboardConfigured) {
+                list.innerHTML = '<div class="lb-status">Leaderboard isn\'t set up yet — paste your Firebase config in the script.</div>';
+                return;
+            }
+            const scores = await window.fetchLeaderboard();
+            if (scores === null) {
+                list.innerHTML = '<div class="lb-status">Couldn\'t load the leaderboard. Check your Firebase config/connection.</div>';
+                return;
+            }
+            if (scores.length === 0) {
+                list.innerHTML = '<div class="lb-status">No scores yet — be the first!</div>';
+                return;
+            }
+            list.innerHTML = scores.map((s, i) => `
+                <div class="lb-row">
+                    <span class="lb-rank">#${i + 1}</span>
+                    <span class="lb-name">${escapeHtml(s.name || 'Anonymous')}</span>
+                    <span class="lb-level">Lv ${s.level ?? '-'}</span>
+                    <span class="lb-score">${s.score ?? 0}</span>
+                </div>
+            `).join('');
+        }
+        async function submitLeaderboardEntry() {
+            if (leaderboardSubmitting) return;
+            const status = document.getElementById('leaderboardSubmitStatus');
+            if (!window.__leaderboardConfigured) {
+                status.textContent = "Leaderboard isn't set up yet — paste your Firebase config in the script.";
+                return;
+            }
+            const nameInput = document.getElementById('leaderboardNameInput');
+            const name = (nameInput.value || '').trim() || 'Anonymous';
+            try { localStorage.setItem('leaderboardName', name); } catch (e) { /* ignore */ }
+            const btn = document.getElementById('leaderboardSubmitBtn');
+            leaderboardSubmitting = true;
+            btn.disabled = true;
+            status.textContent = 'Submitting…';
+            const ok = await window.submitLeaderboardScore(name, gameState.score, gameState.level);
+            leaderboardSubmitting = false;
+            btn.disabled = false;
+            status.textContent = ok ? 'Submitted!' : 'Failed to submit — try again.';
+            if (ok) refreshLeaderboardDisplay();
+        }
         function updateShopDisplay() {
             const autoRepairBtn = document.getElementById('buyAutoRepairBtn');
             const autoRepairStatus = document.getElementById('shopAutoRepairStatus');
@@ -4199,6 +4363,75 @@
         // waiting for the level-11 cutscene to trigger it on demand.
         window.__preloadCharizardModel = function(onProgress) {
             return loadCharizardScene(onProgress);
+        };
+    </script>
+    <script type="module">
+        // --- Firebase (global leaderboard) ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+        import {
+            getFirestore, collection, addDoc, query, orderBy, limit, getDocs, serverTimestamp
+        } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+
+        // ==== PASTE YOUR FIREBASE PROJECT CONFIG HERE ====
+        // Firebase Console -> Project settings (gear icon) -> General -> "Your apps" ->
+        // SDK setup and configuration -> Config. This object is NOT a secret — it's safe to
+        // ship in client-side code; access control is handled by Firestore Security Rules in
+        // the console, not by hiding this object. Leaving it blank just makes the leaderboard
+        // show "not set up yet" instead of breaking the rest of the game.
+        const firebaseConfig = {
+            apiKey: "",
+            authDomain: "",
+            projectId: "",
+            storageBucket: "",
+            messagingSenderId: "",
+            appId: ""
+        };
+
+        const LEADERBOARD_COLLECTION = 'leaderboard';
+        const LEADERBOARD_LIMIT = 10;
+
+        let db = null;
+        if (firebaseConfig.apiKey && firebaseConfig.projectId) {
+            try {
+                const firebaseApp = initializeApp(firebaseConfig);
+                db = getFirestore(firebaseApp);
+            } catch (err) {
+                console.error('Firebase init failed:', err);
+            }
+        } else {
+            console.warn('Leaderboard: paste your Firebase config into firebaseConfig to enable it.');
+        }
+        window.__leaderboardConfigured = !!db;
+
+        // Returns true/false instead of throwing, so the UI can show a plain status message.
+        window.submitLeaderboardScore = async function(name, score, level) {
+            if (!db) return false;
+            try {
+                await addDoc(collection(db, LEADERBOARD_COLLECTION), {
+                    name: (name || 'Anonymous').slice(0, 20),
+                    score,
+                    level,
+                    createdAt: serverTimestamp()
+                });
+                return true;
+            } catch (err) {
+                console.error('Failed to submit leaderboard score:', err);
+                return false;
+            }
+        };
+
+        // Returns the top scores, or null on failure (vs. an empty array for "no scores yet")
+        // so the UI can tell the two cases apart.
+        window.fetchLeaderboard = async function() {
+            if (!db) return null;
+            try {
+                const q = query(collection(db, LEADERBOARD_COLLECTION), orderBy('score', 'desc'), limit(LEADERBOARD_LIMIT));
+                const snap = await getDocs(q);
+                return snap.docs.map(d => d.data());
+            } catch (err) {
+                console.error('Failed to fetch leaderboard:', err);
+                return null;
+            }
         };
     </script>
 </body>
