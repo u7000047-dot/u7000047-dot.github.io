@@ -3912,28 +3912,63 @@
         // cutscenes (which load the same GLB) never have to wait mid-scene — the 23MB model
         // dominates load time, so it's weighted far more heavily than the small PNGs.
         const PRELOAD_IMAGES = ['charizard.png', 'charmander_left.png', 'weezing.png', 'Rayquaza.png', 'kyogre.png'];
+        const bgMusic = new Audio('phonk%20music.mp3');
+        bgMusic.loop = true;
+        bgMusic.volume = 0.35;
+        bgMusic.preload = 'auto';
+        // Browsers refuse to start audio until the page has been interacted with, so if the
+        // first play() is rejected, latch onto the next click/keypress and start there.
+        function startBackgroundMusic() {
+            const attempt = bgMusic.play();
+            if (!attempt || typeof attempt.catch !== 'function') return;
+            attempt.catch(() => {
+                const resume = () => {
+                    document.removeEventListener('pointerdown', resume);
+                    document.removeEventListener('keydown', resume);
+                    bgMusic.play().catch(() => {});
+                };
+                document.addEventListener('pointerdown', resume);
+                document.addEventListener('keydown', resume);
+            });
+        }
         function preloadAllAssets(onProgress) {
-            const IMAGE_WEIGHT = 0.1;
+            const SMALL_ASSET_WEIGHT = 0.1;
             const MODEL_WEIGHT = 0.9;
-            let imagesLoaded = 0;
+            const smallAssetCount = PRELOAD_IMAGES.length + 1; // + the music track
+            let smallAssetsLoaded = 0;
             let modelProgress = 0;
             const report = () => {
                 if (onProgress) {
-                    const imageFrac = PRELOAD_IMAGES.length ? imagesLoaded / PRELOAD_IMAGES.length : 1;
-                    onProgress(imageFrac * IMAGE_WEIGHT + modelProgress * MODEL_WEIGHT);
+                    onProgress((smallAssetsLoaded / smallAssetCount) * SMALL_ASSET_WEIGHT + modelProgress * MODEL_WEIGHT);
                 }
             };
             const imagePromises = PRELOAD_IMAGES.map(src => new Promise((resolve) => {
                 const img = new Image();
-                img.onload = img.onerror = () => { imagesLoaded++; report(); resolve(); };
+                img.onload = img.onerror = () => { smallAssetsLoaded++; report(); resolve(); };
                 img.src = src;
             }));
+            // 'canplaythrough' is unreliable across browsers, so cap the wait — worst case the
+            // track finishes buffering a moment into play instead of stalling the loading screen.
+            const musicPromise = new Promise((resolve) => {
+                let settled = false;
+                const done = () => {
+                    if (settled) return;
+                    settled = true;
+                    smallAssetsLoaded++;
+                    report();
+                    resolve();
+                };
+                bgMusic.addEventListener('canplaythrough', done, { once: true });
+                bgMusic.addEventListener('error', done, { once: true });
+                setTimeout(done, 10000);
+                bgMusic.load();
+            });
             const modelPromise = typeof window.__preloadCharizardModel === 'function'
                 ? window.__preloadCharizardModel((frac) => { modelProgress = frac; report(); }).catch((err) => {
                     console.error('Charizard model preload failed:', err);
                 })
                 : Promise.resolve();
-            return Promise.all([...imagePromises, modelPromise]).then(() => { modelProgress = 1; report(); });
+            return Promise.all([...imagePromises, musicPromise, modelPromise]).then(() => { modelProgress = 1; report(); });
         }
         // Start game
         window.addEventListener('load', () => {
@@ -3952,6 +3987,7 @@
             }).then(() => {
                 loadingScreen.style.display = 'none';
                 if (!gameState.paused) gameState.gameRunning = true;
+                startBackgroundMusic();
                 game.run();
             });
 
