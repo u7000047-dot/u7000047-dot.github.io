@@ -328,7 +328,7 @@
         #scoreboardMenu .sb-rank { width: 30px; color: #4fc3f7; font-weight: bold; }
         #scoreboardMenu .sb-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         #scoreboardMenu .sb-score { width: 70px; text-align: right; color: #ffd700; font-weight: bold; }
-        #scoreboardMenu .sb-level { width: 50px; text-align: right; color: #7ec8e3; }
+        #scoreboardMenu .sb-date { width: 90px; text-align: right; color: #7ec8e3; }
         #scoreboardMenu .sb-submit-row { display: flex; gap: 8px; margin-bottom: 4px; }
         #scoreboardMenu .sb-name-input {
             flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #4fc3f7;
@@ -426,8 +426,7 @@
         "imports": {
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
             "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-            "firebase/app": "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js",
-            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js"
+            "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
         }
     }
     </script>
@@ -3731,7 +3730,7 @@
         }
         // --- Scoreboard Menu ---
         // localStorage is used only to remember the player's display name locally. The shared
-        // score data itself lives in Firestore (see the module script near the end of the file).
+        // score data itself lives in Supabase (see the module script near the end of the file).
         const SCOREBOARD_NAME_KEY = 'sideScrollerScoreboardName';
         function getSavedScoreboardName() {
             try { return localStorage.getItem(SCOREBOARD_NAME_KEY) || ''; }
@@ -3776,7 +3775,7 @@
                     li.innerHTML = `<span class="sb-rank">#${i + 1}</span>` +
                         `<span class="sb-name">${escapeHtml(s.name)}</span>` +
                         `<span class="sb-score">${s.score}</span>` +
-                        `<span class="sb-level">Lv ${s.level}</span>`;
+                        `<span class="sb-date">${escapeHtml(String(s.date ?? '').slice(0, 10))}</span>`;
                     listEl.appendChild(li);
                 });
             } catch (err) {
@@ -3796,7 +3795,7 @@
             submitBtn.disabled = true;
             statusEl.textContent = 'Submitting...';
             try {
-                await window.submitScore(name, gameState.money, gameState.level);
+                await window.submitScore(name, gameState.money);
                 saveScoreboardName(name);
                 statusEl.textContent = 'Score submitted!';
                 await refreshScoreboardDisplay();
@@ -3916,6 +3915,15 @@
         bgMusic.loop = true;
         bgMusic.volume = 0.35;
         bgMusic.preload = 'auto';
+        const shootSound = new Audio('lazer%20phonk%20shooting%20sound.mp3');
+        shootSound.volume = 0.5;
+        shootSound.preload = 'auto';
+        // Play a fresh copy per shot so rapid clicks overlap instead of cutting each other off.
+        function playShootSound() {
+            const shot = shootSound.cloneNode();
+            shot.volume = shootSound.volume;
+            shot.play().catch(() => {});
+        }
         // Browsers refuse to start audio until the page has been interacted with, so if the
         // first play() is rejected, latch onto the next click/keypress and start there.
         function startBackgroundMusic() {
@@ -4095,6 +4103,7 @@
                 const targetX = gameState.mouseWorldX || (player.direction === Direction.LEFT ? player.x - 200 : player.x + 200);
                 const targetY = gameState.mouseWorldY || (player.y + player.height / 2);
                 gameState.fireballs.push(new Fireball(player.x + player.width / 2, player.y + player.height / 2, targetX, targetY));
+                playShootSound();
             });
             game.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
             // Fallback releases in case a mousemove/mousedown never fires after the button lifts
@@ -4235,29 +4244,104 @@
             }
         }
 
-        // Victory formation for the win cutscene: two rows of 10 flat-shaded blocks standing on
-        // the ground flanking Charizard — blue troops to the left, red troops to the right —
-        // colored to match the 2D game's own enemy/player palette (COLORS.BLUE / COLORS.RED).
+        // Sky/ground colors for the win cutscene, matching the 2D game's default biome
+        // (COLORS.LIGHT_BLUE sky over COLORS.GREEN ground).
+        const WIN_SKY_COLOR = 0x87ceeb;
+        const WIN_GROUND_COLOR = 0x228b22;
+
+        // Win cutscene set dressing: a green ground plane plus the defeated enemies lying flat on
+        // it, scattered at random behind Charizard — 10 blue blocks (Enemy) and 10 red triangles
+        // (ChaserEnemy), each with a pair of googly eyes, colored to match the 2D game's own
+        // palette (COLORS.BLUE / COLORS.RED).
         function createEnemyFormation() {
             removeEnemyFormation();
             const radius = camera.userData.radius;
             const boxWidth = radius * 0.12;
-            const boxHeight = radius * 0.28;
-            const boxDepth = radius * 0.12;
-            const sideX = radius * 0.75;
-            const spacingZ = radius * 0.3;
+            const boxLength = radius * 0.28;
+            const boxThickness = radius * 0.12;
+            const triRadius = radius * 0.14;
+            const triThickness = radius * 0.05;
+            const eyeRadius = radius * 0.03;
             const count = 10;
-            const geometry = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth);
+            formationGroup = new THREE.Group();
+
+            // Unlit, so the ground is exactly the game's green rather than shaded by the lights.
+            const groundSize = radius * 40;
+            if (camera.far < groundSize * 1.5) {
+                camera.far = groundSize * 1.5;
+                camera.updateProjectionMatrix();
+            }
+            const ground = new THREE.Mesh(
+                new THREE.PlaneGeometry(groundSize, groundSize),
+                new THREE.MeshBasicMaterial({ color: WIN_GROUND_COLOR })
+            );
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = groundY;
+            formationGroup.add(ground);
+
+            // Lying on their backs: the long axis runs along local z, the front face points up.
+            const boxGeometry = new THREE.BoxGeometry(boxWidth, boxThickness, boxLength);
+            const triGeometry = new THREE.CylinderGeometry(triRadius, triRadius, triThickness, 3);
+            const eyeGeometry = new THREE.SphereGeometry(eyeRadius, 16, 12);
+            const pupilGeometry = new THREE.SphereGeometry(eyeRadius * 0.5, 12, 8);
             const blueMaterial = new THREE.MeshStandardMaterial({ color: 0x6495ed });
             const redMaterial = new THREE.MeshStandardMaterial({ color: 0xdc143c });
-            formationGroup = new THREE.Group();
+            const eyeMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+            const pupilMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            const up = new THREE.Vector3(0, 1, 0);
+
+            // Two white eyeballs sitting on the body's top face. Each pupil is pushed toward the
+            // camera (plus some jitter, for the googly look) so it stays visible from the front.
+            function addGooglyEyes(body, angle, topY, eyeSpacing, eyeZ) {
+                for (const side of [-1, 1]) {
+                    const eye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+                    eye.position.set(side * eyeSpacing, topY + eyeRadius * 0.6, eyeZ);
+                    body.add(eye);
+                    const lookDir = new THREE.Vector3(
+                        (Math.random() - 0.5) * 0.9,
+                        0.4 + Math.random() * 0.5,
+                        1
+                    ).normalize().applyAxisAngle(up, -angle);
+                    const pupil = new THREE.Mesh(pupilGeometry, pupilMaterial);
+                    pupil.position.copy(eye.position).addScaledVector(lookDir, eyeRadius * 0.65);
+                    body.add(pupil);
+                }
+            }
+
+            // Random spots behind Charizard (negative z; the camera sits at +z), kept apart so
+            // the bodies don't pile on top of each other.
+            const minGap = radius * 0.36;
+            const spots = [];
+            function pickSpot() {
+                let spot;
+                for (let tries = 0; tries < 40; tries++) {
+                    spot = {
+                        x: (Math.random() - 0.5) * radius * 2.8,
+                        z: -radius * (0.5 + Math.random() * 1.9)
+                    };
+                    if (spots.every(s => Math.hypot(s.x - spot.x, s.z - spot.z) >= minGap)) break;
+                }
+                spots.push(spot);
+                return spot;
+            }
+
             for (let i = 0; i < count; i++) {
-                const z = (i - (count - 1) / 2) * spacingZ;
-                const blue = new THREE.Mesh(geometry, blueMaterial);
-                blue.position.set(-sideX, groundY + boxHeight / 2, z);
+                const blueSpot = pickSpot();
+                const blueAngle = Math.random() * Math.PI * 2;
+                const blue = new THREE.Group();
+                blue.add(new THREE.Mesh(boxGeometry, blueMaterial));
+                addGooglyEyes(blue, blueAngle, boxThickness / 2, boxWidth * 0.25, boxLength * 0.28);
+                blue.position.set(blueSpot.x, groundY + boxThickness / 2, blueSpot.z);
+                blue.rotation.y = blueAngle;
                 formationGroup.add(blue);
-                const red = new THREE.Mesh(geometry, redMaterial);
-                red.position.set(sideX, groundY + boxHeight / 2, z);
+
+                const redSpot = pickSpot();
+                const redAngle = Math.random() * Math.PI * 2;
+                const red = new THREE.Group();
+                red.add(new THREE.Mesh(triGeometry, redMaterial));
+                addGooglyEyes(red, redAngle, triThickness / 2, triRadius * 0.22, 0);
+                red.position.set(redSpot.x, groundY + triThickness / 2, redSpot.z);
+                red.rotation.y = redAngle;
                 formationGroup.add(red);
             }
             scene.add(formationGroup);
@@ -4316,6 +4400,7 @@
             const skyLookY = radius * 3; // a point high above the model, simulating "facing the sky"
             const white = new THREE.Color(0xffffff);
             const black = new THREE.Color(0x000000);
+            const dollyBackground = new THREE.Color(options.backgroundColor ?? 0x000000);
             const cameraMode = options.cameraMode || 'orbit';
             const startTime = performance.now();
 
@@ -4327,7 +4412,7 @@
                     // Win cutscene: camera stays directly in front of Charizard the whole time
                     // (never orbits around him) — it starts close on his face and eases straight
                     // backward, settling from face height down into the normal wide framing.
-                    scene.background.copy(black);
+                    scene.background.copy(dollyBackground);
                     if (elapsed <= PANBACK_DURATION_MS) {
                         const panT = elapsed / PANBACK_DURATION_MS;
                         const eased = 1 - Math.pow(1 - panT, 2); // ease-out
@@ -4388,12 +4473,13 @@
 
         // Level-21 win cutscene: plays animation clips 30, 28, 27 (in that order) once each
         // instead of looping rangeattack01, uses the 'dollyOut' camera (stays in front of
-        // Charizard's face and pans straight back, no orbit), and flanks him with a victory
-        // formation of 10 blue + 10 red blocks standing on the ground.
+        // Charizard's face and pans straight back, no orbit), and sets him on green ground under
+        // a blue sky with 10 blue blocks + 10 red triangles lying defeated behind him.
         window.playCharizardWinCutscene = function playCharizardWinCutscene(onComplete) {
             return runCharizardCutscene({
                 caption: 'Congratulations you win.',
                 cameraMode: 'dollyOut',
+                backgroundColor: WIN_SKY_COLOR,
                 setupAnimation: () => { playCharizardAnimationSequence([30, 28, 27]); createEnemyFormation(); },
                 teardownAnimation: () => { stopCharizardAnimationSequence(); removeEnemyFormation(); }
             }, onComplete);
@@ -4406,63 +4492,44 @@
         };
     </script>
     <script type="module">
-        // --- Global Scoreboard (Firebase Firestore) ---
-        // Firebase project config: replace the placeholders below with the values from
-        // Firebase Console > Project settings > General > Your apps > Web app > SDK setup and configuration.
-        // NOTE: this apiKey is not a secret — access is enforced by Firestore Security Rules, not this key.
-        const firebaseConfig = {
-            apiKey: "REPLACE_ME",
-            authDomain: "REPLACE_ME.firebaseapp.com",
-            projectId: "REPLACE_ME",
-            storageBucket: "REPLACE_ME.appspot.com",
-            messagingSenderId: "REPLACE_ME",
-            appId: "REPLACE_ME"
-        };
+        // --- Global Scoreboard (Supabase) ---
+        // Supabase project config: replace the placeholders below with the values from
+        // Supabase Dashboard > Project Settings > API (Project URL + anon/publishable key).
+        // NOTE: the anon key is not a secret — access is enforced by Row Level Security
+        // policies on the table, not this key. Never put the service_role key here.
+        const SUPABASE_URL = 'https://oeipfgoraldttdvghkcv.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_y60CIXWzLpeIe4F1AwVrBA_HSrnbvO7';
 
-        import { initializeApp } from 'firebase/app';
-        import {
-            getFirestore, collection, addDoc, query, orderBy, limit, getDocs, serverTimestamp
-        } from 'firebase/firestore';
+        import { createClient } from '@supabase/supabase-js';
 
-        const SCORES_COLLECTION = 'scores';
-        // With a misconfigured/placeholder project, the Firestore SDK doesn't reject quickly —
-        // it retries its long-poll connection indefinitely, which would leave the scoreboard UI
-        // stuck on "Loading..."/"Submitting..." forever. Race every call against a timeout so a
-        // bad config surfaces as a clear error instead of a silent hang.
-        const FIRESTORE_TIMEOUT_MS = 8000;
-        function withTimeout(promise, ms) {
-            return Promise.race([
-                promise,
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out contacting the scoreboard.')), ms))
-            ]);
-        }
+        const SCORES_TABLE = 'game_scores';
 
-        let db = null;
+        let supabase = null;
         try {
-            const app = initializeApp(firebaseConfig);
-            db = getFirestore(app);
+            supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         } catch (err) {
-            console.error('Firebase init failed — scoreboard will be unavailable.', err);
+            console.error('Supabase init failed — scoreboard will be unavailable.', err);
         }
 
-        window.submitScore = async function submitScore(name, score, level) {
-            if (!db) throw new Error('Scoreboard is not configured.');
+        window.submitScore = async function submitScore(name, score) {
+            if (!supabase) throw new Error('Scoreboard is not configured.');
             const cleanName = String(name || 'Anonymous').trim().slice(0, 20) || 'Anonymous';
             const cleanScore = Math.max(0, Math.floor(Number(score) || 0));
-            const cleanLevel = Math.max(1, Math.floor(Number(level) || 1));
-            await withTimeout(addDoc(collection(db, SCORES_COLLECTION), {
-                name: cleanName,
-                score: cleanScore,
-                level: cleanLevel,
-                timestamp: serverTimestamp()
-            }), FIRESTORE_TIMEOUT_MS);
+            const { error } = await supabase
+                .from(SCORES_TABLE)
+                .insert({ name: cleanName, score: cleanScore, date: new Date().toISOString() });
+            if (error) throw error;
         };
 
         window.fetchTopScores = async function fetchTopScores(n = 10) {
-            if (!db) throw new Error('Scoreboard is not configured.');
-            const q = query(collection(db, SCORES_COLLECTION), orderBy('score', 'desc'), limit(n));
-            const snapshot = await withTimeout(getDocs(q), FIRESTORE_TIMEOUT_MS);
-            return snapshot.docs.map(d => d.data());
+            if (!supabase) throw new Error('Scoreboard is not configured.');
+            const { data, error } = await supabase
+                .from(SCORES_TABLE)
+                .select('name, score, date')
+                .order('score', { ascending: false })
+                .limit(n);
+            if (error) throw error;
+            return data;
         };
     </script>
 </body>
