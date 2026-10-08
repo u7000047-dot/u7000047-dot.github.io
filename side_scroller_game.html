@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Side Scrolling Game</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <style>
         * {
             margin: 0;
@@ -350,6 +351,25 @@
             display: none;
             z-index: 300;
         }
+        #adminNotice {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(10, 10, 30, 0.95);
+            color: #ffd700;
+            border: 2px solid #ffd700;
+            padding: 18px 34px;
+            border-radius: 10px;
+            font-family: Arial, sans-serif;
+            font-size: 18px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            display: none;
+            z-index: 320;
+            pointer-events: none;
+            box-shadow: 0 0 34px rgba(255, 215, 0, 0.35);
+        }
         #assetLoadingScreen {
             position: absolute;
             top: 0;
@@ -433,6 +453,7 @@
 </head>
 <body>
     <div id="gameContainer">
+        <div id="adminNotice">&#128081; Admin commands unlocked</div>
         <div id="assetLoadingScreen">
             <h2>Loading assets&hellip;</h2>
             <div id="assetLoadingBar"><div id="assetLoadingFill"></div></div>
@@ -523,6 +544,11 @@
         const KATANA_COOLDOWN_FRAMES = FPS * 5;   // then needs a 5s cooldown before it can be used again
         const KATANA_MELEE_SWING_FRAMES = 14;     // visual swing duration for a melee tap (damage applies instantly)
         const KATANA_MELEE_REACH = 90;
+        // Rayquaza finisher: Charizard flies up to it, holds a stare-down, then detonates it.
+        const SLAY_FLY_FRAMES = 45;
+        const SLAY_HOVER_FRAMES = FPS * 2;  // the 2s pause before Rayquaza blows up
+        const SLAY_BLAST_FRAMES = 45;
+        const SLAY_STANDOFF = 70;           // gap held alongside Rayquaza so both sprites stay readable
         // Colors
         const COLORS = {
             WHITE: '#ffffff',
@@ -2587,6 +2613,7 @@
                 }
                 gameState.katanaMeleeSwingTimer = KATANA_MELEE_SWING_FRAMES;
                 gameState.katanaMeleeFacing = facing;
+                playKatanaSound();
             }
             // Removes a defeated enemy and awards its points — except RayquazaBoss, which
             // instead triggers the falling-katana slay cutscene. It's kept in the enemies list
@@ -2609,55 +2636,56 @@
             }
             startRayquazaSlayCutscene(enemy) {
                 gameState.gasDebuffTimer = 0;
+                const bossCenterX = enemy.x + enemy.width / 2;
+                const approachFromLeft = this.player.x + this.player.width / 2 <= bossCenterX;
                 gameState.slayCutscene = {
-                    stage: 'falling',
+                    stage: 'fly',
                     timer: 0,
                     enemy,
-                    katanaX: this.player.x + this.player.width / 2,
-                    katanaY: -60,
-                    katanaAngle: 0
+                    startX: this.player.x,
+                    startY: this.player.y,
+                    // Pull up beside Rayquaza rather than on top of it, facing whichever way he came from.
+                    targetX: bossCenterX + (approachFromLeft ? -SLAY_STANDOFF : SLAY_STANDOFF) - this.player.width / 2,
+                    targetY: enemy.y + enemy.height / 2 - this.player.height / 2,
+                    facing: approachFromLeft ? Direction.RIGHT : Direction.LEFT
                 };
             }
             updateSlayCutscene() {
                 const cut = gameState.slayCutscene;
                 const player = this.player;
-                const bossX = cut.enemy.x + cut.enemy.width / 2;
-                const bossY = cut.enemy.y + cut.enemy.height / 2;
                 cut.timer++;
-                if (cut.stage === 'falling') {
-                    const targetY = player.y - 20;
-                    const t = Math.min(1, cut.timer / 45);
-                    cut.katanaY = -60 + (targetY - -60) * t;
-                    cut.katanaAngle = t * Math.PI * 4;
-                    if (t >= 1) { cut.stage = 'claim'; cut.timer = 0; }
-                } else if (cut.stage === 'claim') {
-                    cut.katanaAngle = Math.sin(cut.timer * 0.3) * 0.15;
-                    if (cut.timer >= 30) {
-                        cut.stage = 'dash';
+                player.direction = cut.facing;
+                if (cut.stage === 'fly') {
+                    // Gravity is skipped entirely during the cutscene, so flying is just a lerp
+                    // up to Rayquaza — eased out so he decelerates into the stare-down.
+                    const t = Math.min(1, cut.timer / SLAY_FLY_FRAMES);
+                    const eased = 1 - Math.pow(1 - t, 3);
+                    player.x = cut.startX + (cut.targetX - cut.startX) * eased;
+                    player.y = cut.startY + (cut.targetY - cut.startY) * eased;
+                    if (t >= 1) { cut.stage = 'hover'; cut.timer = 0; }
+                } else if (cut.stage === 'hover') {
+                    // Hold for two seconds, bobbing on the wingbeat so he reads as hovering.
+                    player.x = cut.targetX;
+                    player.y = cut.targetY + Math.sin(cut.timer * 0.12) * 4;
+                    if (cut.timer >= SLAY_HOVER_FRAMES) {
+                        cut.stage = 'blast';
                         cut.timer = 0;
-                        cut.dashStartX = player.x;
-                        cut.dashStartY = player.y;
-                        cut.dashTargetX = bossX - (bossX >= player.x ? 60 : -60);
-                    }
-                } else if (cut.stage === 'dash') {
-                    const t = Math.min(1, cut.timer / 22);
-                    player.x = cut.dashStartX + (cut.dashTargetX - cut.dashStartX) * t;
-                    player.direction = bossX >= cut.dashStartX ? Direction.RIGHT : Direction.LEFT;
-                    if (t >= 1) {
-                        cut.stage = 'slash';
-                        cut.timer = 0;
-                        cut.bossX = bossX;
-                        cut.bossY = bossY;
+                        cut.bossX = cut.enemy.x + cut.enemy.width / 2;
+                        cut.bossY = cut.enemy.y + cut.enemy.height / 2;
                         const idx = this.enemies.indexOf(cut.enemy);
                         if (idx !== -1) this.enemies.splice(idx, 1);
-                        gameState.explosions.push(new Explosion(bossX, bossY, { count: 70, duration: 85 }));
+                        gameState.explosions.push(new Explosion(cut.bossX, cut.bossY, { count: 90, duration: 110 }));
                         gameState.bossRageFlash = 45;
+                        playKatanaSound();
                     }
-                } else if (cut.stage === 'slash') {
-                    if (cut.timer >= 25) { cut.stage = 'done'; }
+                } else if (cut.stage === 'blast') {
+                    if (cut.timer >= SLAY_BLAST_FRAMES) { cut.stage = 'done'; }
                 } else if (cut.stage === 'done') {
                     gameState.money += 1000;
                     gameState.score = gameState.money;
+                    // Velocity is whatever it was when the fight ended; clear it so he glides
+                    // down from the hover instead of resuming an interrupted jump.
+                    player.velocityY = 0;
                     gameState.slayCutscene = null;
                 }
             }
@@ -2685,14 +2713,12 @@
             drawSlayCutscene(ctx) {
                 const cut = gameState.slayCutscene;
                 if (!cut) return;
-                if (cut.stage === 'falling' || cut.stage === 'claim') {
-                    const x = cut.stage === 'falling' ? this.player.x + this.player.width / 2 : this.player.x + this.player.width / 2 + 18;
-                    drawKatana(ctx, x, cut.katanaY, cut.katanaAngle);
-                } else if (cut.stage === 'dash') {
+                if (cut.stage === 'fly' || cut.stage === 'hover') {
+                    // Katana stays drawn in hand through the approach and the stare-down.
                     const facing = this.player.direction === Direction.RIGHT ? 1 : -1;
                     drawKatana(ctx, this.player.x + this.player.width / 2 + facing * 22, this.player.y + 20, facing * 1.1);
-                } else if (cut.stage === 'slash') {
-                    const t = cut.timer / 25;
+                } else if (cut.stage === 'blast') {
+                    const t = cut.timer / SLAY_BLAST_FRAMES;
                     ctx.save();
                     ctx.globalAlpha = Math.max(0, 1 - t);
                     ctx.strokeStyle = '#ffffff';
@@ -2909,11 +2935,13 @@
                 // equips the katana and deflects incoming bullets back at whichever enemy
                 // fired them instead of costing a life.
                 const playerBox = this.player.getCollisionBox();
+                let deflectedThisFrame = false;
                 for (let i = gameState.enemyFireballs.length - 1; i >= 0; i--) {
                     const efb = gameState.enemyFireballs[i];
                     if (!checkCollision(playerBox, efb.getCollisionBox())) continue;
                     if (gameState.level >= 16 && gameState.katanaDeflectActive) {
                         gameState.enemyFireballs.splice(i, 1);
+                        deflectedThisFrame = true;
                         const owner = efb.owner;
                         const ownerAlive = owner && this.enemies.includes(owner);
                         const targetX = ownerAlive ? owner.x + owner.width / 2 : efb.x - efb.vx * 20;
@@ -2928,6 +2956,8 @@
                         }
                     }
                 }
+                // One clang per frame, however many shots the blade turned away at once.
+                if (deflectedThisFrame) playKatanaSound();
                 // Check player-enemy collision. Kyogre is water itself as far as the player is
                 // concerned — touching it just costs a life (on the same grace-period cooldown
                 // as swimming into open water) instead of the usual knockback-to-house + money
@@ -3534,6 +3564,25 @@
         function jumpToLevel11() {
             startGameAtLevel(15);
         }
+        // --- Admin unlock ---
+        // Every debug/cheat key (level skips, the cash+stats boost, cutscene replays) stays dead
+        // until this sequence is typed, so a normal player can't stumble onto them. It unlocks
+        // for the current page session only — reloading re-locks it.
+        const ADMIN_UNLOCK_SEQUENCE = 'u7000047';
+        let adminUnlocked = false;
+        let adminUnlockProgress = '';
+        // Feeds each printable keypress into a rolling buffer and unlocks on a match.
+        function trackAdminUnlock(key) {
+            if (adminUnlocked || typeof key !== 'string' || key.length !== 1) return;
+            adminUnlockProgress = (adminUnlockProgress + key.toLowerCase()).slice(-ADMIN_UNLOCK_SEQUENCE.length);
+            if (adminUnlockProgress !== ADMIN_UNLOCK_SEQUENCE) return;
+            adminUnlocked = true;
+            adminUnlockProgress = '';
+            const notice = document.getElementById('adminNotice');
+            notice.style.display = 'block';
+            clearTimeout(trackAdminUnlock.hideTimer);
+            trackAdminUnlock.hideTimer = setTimeout(() => { notice.style.display = 'none'; }, 2500);
+        }
         // Admin cheat: press G in-game for a massive stat boost (testing/debug use)
         function activateAdminCheat() {
             gameState.lives = 10000;
@@ -3800,8 +3849,12 @@
                 statusEl.textContent = 'Score submitted!';
                 await refreshScoreboardDisplay();
             } catch (err) {
-                console.error('Failed to submit score', err);
-                statusEl.textContent = 'Failed to submit score. Try again later.';
+                if (err && err.code === 'SCORE_REJECTED') {
+                    statusEl.textContent = `Score rejected — ${err.message}`;
+                } else {
+                    console.error('Failed to submit score', err);
+                    statusEl.textContent = 'Failed to submit score. Try again later.';
+                }
             } finally {
                 submitBtn.disabled = false;
             }
@@ -3924,6 +3977,16 @@
             shot.volume = shootSound.volume;
             shot.play().catch(() => {});
         }
+        const katanaSound = new Audio('katana%20sound.mp3');
+        katanaSound.volume = 0.55;
+        katanaSound.preload = 'auto';
+        // Same fresh-copy trick: a melee swing and a deflect landing back to back shouldn't
+        // cut each other off.
+        function playKatanaSound() {
+            const swing = katanaSound.cloneNode();
+            swing.volume = katanaSound.volume;
+            swing.play().catch(() => {});
+        }
         // Browsers refuse to start audio until the page has been interacted with, so if the
         // first play() is rejected, latch onto the next click/keypress and start there.
         function startBackgroundMusic() {
@@ -4016,6 +4079,9 @@
                         showPauseMenu();
                     }
                 }
+                trackAdminUnlock(e.key);
+                // Everything below is admin-only and stays inert until the unlock sequence is typed.
+                if (!adminUnlocked) return;
                 // Debug: replay the Charizard cutscene on demand while the pause menu is open
                 if ((e.key === 'c' || e.key === 'C') && gameState.paused && typeof window.playCharizardCutscene === 'function') {
                     document.getElementById('pauseMenu').style.display = 'none';
@@ -4511,10 +4577,19 @@
             console.error('Supabase init failed — scoreboard will be unavailable.', err);
         }
 
+        // No legitimate run banks this much, and the admin 'G' cheat grants exactly 1,000,000 —
+        // so anything past this is a cheated score and never reaches the table.
+        const MAX_SUBMITTABLE_SCORE = 500000;
+
         window.submitScore = async function submitScore(name, score) {
             if (!supabase) throw new Error('Scoreboard is not configured.');
             const cleanName = String(name || 'Anonymous').trim().slice(0, 20) || 'Anonymous';
             const cleanScore = Math.max(0, Math.floor(Number(score) || 0));
+            if (cleanScore > MAX_SUBMITTABLE_SCORE) {
+                const rejection = new Error(`Score above the ${MAX_SUBMITTABLE_SCORE.toLocaleString()} limit.`);
+                rejection.code = 'SCORE_REJECTED';
+                throw rejection;
+            }
             const { error } = await supabase
                 .from(SCORES_TABLE)
                 .insert({ name: cleanName, score: cleanScore, date: new Date().toISOString() });

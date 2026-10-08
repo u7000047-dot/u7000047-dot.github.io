@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+    <defs>
+        <linearGradient id="flame" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#ffd166"/>
+            <stop offset="45%" stop-color="#ff9f1c"/>
+            <stop offset="100%" stop-color="#ff3c00"/>
+        </linearGradient>
+        <linearGradient id="core" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#fff6d5"/>
+            <stop offset="100%" stop-color="#ffd166"/>
+        </linearGradient>
+    </defs>
+    <!-- Dark plate so the flame keeps contrast against light and dark browser tabs alike -->
+    <rect width="64" height="64" rx="14" fill="#141830"/>
+    <path d="M32 5 C34 17 44 21 46 33 C48 45 41 58 32 58 C23 58 16 49 16 37 C16 29 20 22 24 17 C25 24 27 27 29 27 C32 27 31 15 32 5 Z"
+          fill="url(#flame)"/>
+    <path d="M32 29 C34 35 38 39 38 44 C38 50 35 54 32 54 C29 54 25 50 25 44 C25 39 30 35 32 29 Z"
+          fill="url(#core)"/>
+</svg>

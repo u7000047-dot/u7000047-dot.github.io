@@ -3,73 +3,293 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welcome to Side Scroller Game!</title>
+    <title>Side Scroller Game</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             min-height: 100vh;
-            margin: 0;
+            display: flex;
+            flex-direction: column;
+            background: linear-gradient(180deg, #7ec8e3 0%, #a8dcef 55%, #cfeeda 100%);
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        /* --- Sky layer: drifting clouds behind everything --- */
+        .cloud {
+            position: fixed;
+            top: 0;
+            background: #fff;
+            border-radius: 50%;
+            opacity: 0.85;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .cloud::before, .cloud::after {
+            content: '';
+            position: absolute;
+            background: #fff;
+            border-radius: 50%;
+        }
+        .cloud::before { width: 60%; height: 120%; left: 12%; bottom: 30%; }
+        .cloud::after  { width: 45%; height: 95%;  right: 10%; bottom: 25%; }
+        .cloud.c1 { width: 120px; height: 38px; top: 12%; animation: drift 48s linear infinite; }
+        .cloud.c2 { width: 180px; height: 52px; top: 26%; animation: drift 68s linear infinite; animation-delay: -20s; }
+        .cloud.c3 { width: 90px;  height: 30px; top: 42%; animation: drift 56s linear infinite; animation-delay: -38s; }
+        @keyframes drift {
+            from { transform: translateX(-220px); }
+            to   { transform: translateX(100vw); }
+        }
+
+        /* --- Content --- */
+        main {
+            position: relative;
+            z-index: 2;
+            flex: 1;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            font-family: 'Segoe UI', Arial, sans-serif;
-            color: #fff;
-        }
-        .container {
-            background: rgba(0,0,0,0.7);
-            border-radius: 16px;
-            padding: 40px 32px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            padding: 48px 16px 24px;
             text-align: center;
-            max-width: 400px;
         }
         h1 {
-            font-size: 2.5rem;
-            margin-bottom: 16px;
+            font-size: clamp(2.2rem, 7vw, 4rem);
             color: #ffd700;
+            letter-spacing: 1px;
+            text-shadow: 3px 3px 0 #2b2b4a, 0 0 22px rgba(255, 215, 0, 0.45);
+            margin-bottom: 14px;
         }
-        p {
-            font-size: 1.2rem;
-            margin-bottom: 32px;
+        .tagline {
+            font-size: clamp(1rem, 2.6vw, 1.25rem);
+            color: #22314a;
+            font-weight: 600;
+            margin-bottom: 30px;
+            max-width: 34ch;
         }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 34px;
+        }
+        .key {
+            background: rgba(20, 24, 48, 0.78);
+            border: 2px solid rgba(255, 255, 255, 0.35);
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-size: 0.92rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .key b { color: #ffd700; }
         .play-btn {
+            display: inline-block;
             background: #667eea;
             color: #fff;
             border: none;
-            padding: 16px 40px;
-            font-size: 1.3rem;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: background 0.3s;
+            padding: 17px 48px;
+            font-size: 1.35rem;
             font-weight: bold;
+            font-family: inherit;
+            border-radius: 10px;
+            cursor: pointer;
+            text-decoration: none;
+            box-shadow: 0 6px 0 #42489c, 0 10px 24px rgba(0, 0, 0, 0.28);
+            transition: background 0.2s, transform 0.08s, box-shadow 0.08s;
         }
-        .play-btn:hover {
-            background: #764ba2;
+        .play-btn:hover { background: #764ba2; }
+        .play-btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #42489c, 0 5px 14px rgba(0, 0, 0, 0.28);
         }
-        .footer {
-            margin-top: 40px;
-            font-size: 0.95rem;
-            color: #eee;
+
+        /* --- Stage: the grass strip Charmander runs on --- */
+        #stage {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            height: 190px;
+            margin-top: auto;
         }
+        .grass {
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            height: 92px;
+            background:
+                repeating-linear-gradient(90deg, rgba(0,0,0,0.05) 0 3px, transparent 3px 11px),
+                linear-gradient(180deg, #6cc24a 0%, #4e9e35 42%, #3c7b29 100%);
+            border-top: 5px solid #86d45f;
+        }
+        /* Tufts sprouting along the grass line */
+        .tuft {
+            position: absolute;
+            bottom: 86px;
+            width: 12px;
+            height: 16px;
+            background: #86d45f;
+            clip-path: polygon(50% 0%, 62% 55%, 100% 100%, 0% 100%, 38% 55%);
+            opacity: 0.95;
+        }
+
+        #charmander {
+            position: absolute;
+            bottom: 86px;
+            left: 0;
+            width: 76px;
+            height: auto;
+            image-rendering: pixelated;
+            transform-origin: 50% 100%;
+            will-change: transform;
+        }
+        #shadow {
+            position: absolute;
+            bottom: 80px;
+            left: 0;
+            width: 58px;
+            height: 13px;
+            background: rgba(0, 0, 0, 0.28);
+            border-radius: 50%;
+            filter: blur(1px);
+            will-change: transform, opacity;
+        }
+
+        footer {
+            position: relative;
+            z-index: 2;
+            text-align: center;
+            padding: 14px;
+            font-size: 0.9rem;
+            color: #eaf6ff;
+            background: #3c7b29;
+        }
+
         @media (max-width: 500px) {
-            .container { padding: 24px 8px; }
-            h1 { font-size: 2rem; }
+            #stage { height: 150px; }
+            #charmander { width: 58px; }
+            #shadow { width: 44px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .cloud { animation: none; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="cloud c1"></div>
+    <div class="cloud c2"></div>
+    <div class="cloud c3"></div>
+
+    <main>
         <h1>Side Scroller Game</h1>
-        <p>Welcome to my new side-scrolling platformer!<br>
-        Use A/D to move, SPACE to jump, and avoid the enemies.<br>
-        Try to get the highest score!</p>
-        <a href="side_scroller_game.html">
-            <button class="play-btn">Play Now</button>
-        </a>
+        <p class="tagline">Burn through 20 levels of slimes, bosses and a final showdown at sea.</p>
+        <div class="controls">
+            <span class="key"><b>A</b> / <b>D</b> Move</span>
+            <span class="key"><b>Space</b> Jump</span>
+            <span class="key"><b>Left Click</b> Shoot</span>
+            <span class="key"><b>Esc</b> Menu</span>
+        </div>
+        <a class="play-btn" href="side_scroller_game.html">Play Now</a>
+    </main>
+
+    <div id="stage">
+        <div class="grass"></div>
+        <div id="shadow"></div>
+        <img id="charmander" src="charmander_right.png" alt="Charmander running across the grass">
     </div>
-    <div class="footer">
-        &copy; 2026 Your Name &mdash; Hosted on GitHub Pages
-    </div>
+
+    <footer>&copy; 2026 &mdash; Hosted on GitHub Pages</footer>
+
+    <script>
+        (function () {
+            const sprite = document.getElementById('charmander');
+            const shadow = document.getElementById('shadow');
+            const stage = document.getElementById('stage');
+
+            // Scatter grass tufts across the strip so the ground isn't a flat band.
+            const TUFT_COUNT = 14;
+            for (let i = 0; i < TUFT_COUNT; i++) {
+                const tuft = document.createElement('div');
+                tuft.className = 'tuft';
+                tuft.style.left = ((i + 0.5) / TUFT_COUNT * 100).toFixed(2) + '%';
+                tuft.style.transform = `scale(${(0.7 + (i % 4) * 0.22).toFixed(2)})`;
+                stage.insertBefore(tuft, shadow); // behind Charmander, so he runs on top of them
+            }
+
+            const GRAVITY = 0.62;
+            const JUMP_VELOCITY = 11.5; // upward, since `height` grows away from the ground
+            const RUN_SPEED = 2.1;
+
+            let x = 40;
+            let direction = 1;      // 1 = right, -1 = left
+            let height = 0;         // pixels above the grass line
+            let vy = 0;
+            let airborne = false;
+            let jumpCountdown = 90; // frames until the next hop
+            let strideTime = 0;
+            let maxX = 0;
+
+            function measure() {
+                maxX = Math.max(0, stage.clientWidth - sprite.offsetWidth);
+                if (x > maxX) x = maxX;
+            }
+
+            function render() {
+                // A gentle bob while running sells the stride; mid-air he holds his pose.
+                const bob = airborne ? 0 : Math.abs(Math.sin(strideTime)) * 4;
+                sprite.style.transform = `translate3d(${x}px, ${-(height + bob)}px, 0)`;
+
+                // The shadow tracks him along the ground and shrinks as he rises.
+                const lift = Math.min(height / 150, 1);
+                const shadowX = x + (sprite.offsetWidth - shadow.offsetWidth) / 2;
+                shadow.style.transform = `translate3d(${shadowX}px, 0, 0) scale(${1 - lift * 0.55})`;
+                shadow.style.opacity = String(0.3 - lift * 0.18);
+            }
+
+            function step() {
+                x += RUN_SPEED * direction;
+                strideTime += 0.22;
+
+                // Turn around at the edges of the strip and face the new way.
+                if (x <= 0 || x >= maxX) {
+                    x = Math.max(0, Math.min(x, maxX));
+                    direction *= -1;
+                    sprite.src = direction === 1 ? 'charmander_right.png' : 'charmander_left.png';
+                }
+
+                if (airborne) {
+                    height += vy;
+                    vy -= GRAVITY;
+                    if (height <= 0) {
+                        height = 0;
+                        vy = 0;
+                        airborne = false;
+                        jumpCountdown = 70 + Math.floor(Math.random() * 110);
+                    }
+                } else if (--jumpCountdown <= 0) {
+                    vy = JUMP_VELOCITY;
+                    airborne = true;
+                }
+
+                render();
+                requestAnimationFrame(step);
+            }
+
+            window.addEventListener('resize', measure);
+            // offsetWidth is only correct once the sprite has actual dimensions.
+            if (sprite.complete) measure(); else sprite.addEventListener('load', measure, { once: true });
+
+            if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                x = 40;
+                render();
+            } else {
+                requestAnimationFrame(step);
+            }
+        })();
+    </script>
 </body>
 </html>
